@@ -169,7 +169,6 @@ void ssl_box::close()
 }
 
 
-// 100ms
 ssize_t ssl_box::send(const string &buf, long to)
 {
 	if (!ssl)
@@ -177,7 +176,7 @@ ssize_t ssl_box::send(const string &buf, long to)
 
 	int r = 0, written = 0;
 	long waiting = 0;
-	timespec ts = {0, 10000000};
+	timespec ts = {0, 10000000};	// 10ms
 
 	for (;waiting < to;) {
 		r = SSL_write(ssl, buf.c_str() + written, buf.size() - written);
@@ -217,7 +216,7 @@ ssize_t ssl_box::recv(string &s, long to)
 	int r = 0;
 	char buf[4096] = {0};
 	long waiting = 0;
-	timespec ts = {0, 10000000};
+	timespec ts = {0, 10000000};	// 10ms
 
 	s = "";
 

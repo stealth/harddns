@@ -39,7 +39,7 @@ I just included it for convenience. You may also use IP or IP6 addresses for `dn
 that you found out yourself. Its just a list that worked for me.
 
 Once the config and nss module is in place, stop _nscd_ if it is running, and add the harddns
-module to your `/etc/nsswitch,conf` file, so it looks like so or similar:
+module to your `/etc/nsswitch.conf` file, so it looks like so or similar:
 
 ```
 [...]
@@ -47,7 +47,7 @@ hosts:          files harddns mdns_minimal [NOTFOUND=return] dns
 [...]
 ```
 
-That tells your _glibc_ to use harddns before _mdns_ and _dns_. If you want to kick out
+That tells your _glibc_ to use _harddns_ before _mdns_ and _dns_. If you want to kick out
 resolve by UDP completely, remove the _mdns_ and _dns_ specification.
 
 Start _nscd_ again, if it has been running before, and you are done. All __gethostbyname()__,
