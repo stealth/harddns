@@ -18,7 +18,7 @@ to create the `libnss_harddns.so` NSS module
 Install
 -------
 
-Copy the nss `libnss_harddns.so` file to `/lib64/` (`/lib` on 32Bit systems) and make sure
+Copy the nss `libnss_harddns.so` file to `/lib64/libnss_harddns.so.2` (`/lib` on 32Bit systems) and make sure
 its owned by root:root and has mode 0755.
 Copy the `samples` directory to `/etc/harddns` and make sure it has proper ownership
 and permissions either.
