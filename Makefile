@@ -7,7 +7,11 @@ LIB=-lcrypto -lssl
 all: harddns
 
 harddns: nss.o ssl.o init.o config.o dnshttps.o
-	$(CXX) -shared -Wl,-soname,libnss_harddns.so nss.o ssl.o init.o config.o dnshttps.o -o libnss_harddns.so $(LIB)
+	$(CXX) -pie -shared -Wl,-soname,libnss_harddns.so nss.o ssl.o init.o config.o dnshttps.o -o libnss_harddns.so $(LIB)
+
+test: nss.o ssl.o init.o config.o dnshttps.o
+	$(CXX) -shared -pie nss.o ssl.o init.o config.o dnshttps.o -o test $(LIB)
+
 
 nss.o: nss.cc
 	$(CXX) $(DEF) $(INC) $(CXXFLAGS) nss.cc

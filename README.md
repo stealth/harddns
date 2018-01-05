@@ -21,11 +21,18 @@ Install
 Copy the nss `libnss_harddns.so` file to `/lib64/libnss_harddns.so.2` (`/lib` on 32Bit systems) and make sure
 its owned by root:root and has mode 0755.
 Copy the `samples` directory to `/etc/harddns` and make sure it has proper ownership
-and permissions either.
+and permissions either:
 
-Harddns already comes with a pinned Google X509 certificate that is matched upon
-setup of the TLS connection. In case its expired, you can obtain one by yourself:
-(using the first certificate B64 blob in the chain)
+```
+# chown -R root.root sample
+# cp -rap sample /etc/harddns
+```
+
+If you want to use pinned certificates, you have to place them
+into files named with extension `.pem`. But be warend: Google has
+quite lot of X509 certs they use for `dns.google.com`, and depending
+on which backend the load balancer puts you to, you may end up
+with a different X509 cert at each connect.
 
 ```
 $ openssl s_client -showcerts -connect dns.google.com:443
@@ -33,10 +40,10 @@ $ openssl s_client -showcerts -connect dns.google.com:443
 
 You may put any number of pinned certificates to the `pinned` subdir. The filename
 has to end with `.pem`. At least one of the certificates inside this directory has to match
-upon the TLS connect.
+during the TLS connect, otherwise the resolve will fail.
 
-I just included it for convenience. You may also use IP or IP6 addresses for `dns.google.com`
-that you found out yourself. Its just a list that worked for me.
+`harddns.conf` already contains the IP address of `dns.google.com`, but check
+that its still valid for you (geo fencing etc.).
 
 Once the config and nss module is in place, stop _nscd_ if it is running, and add the harddns
 module to your `/etc/nsswitch.conf` file, so it looks like so or similar:

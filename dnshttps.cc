@@ -1,8 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016 by Sebastian Krahmer,
- *             sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2016-2018 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by

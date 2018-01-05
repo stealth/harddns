@@ -1,8 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016 by Sebastian Krahmer,
- *             sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2016-2018 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,6 +25,7 @@
 #include <time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <map>
 #include "ssl.h"
 
 extern "C" {
@@ -107,11 +108,54 @@ int ssl_box::setup_ctx()
 	if ((SSL_CTX_set_options(ssl_ctx, op) & op) != op)
 		return build_error("SSL_CTX_set_options:", -1);
 
+	if (SSL_CTX_load_verify_locations(ssl_ctx, NULL, "/etc/ssl/certs") != 1)
+		return build_error("SSL_CTX_load_verify_locations:", -1);
+
+	if (SSL_CTX_set_default_verify_paths(ssl_ctx) != 1)
+		return build_error("SSL_CTX_set_default_verify_paths: %s\n", -1);
+
+	SSL_CTX_set_verify(ssl_ctx,
+	                       SSL_VERIFY_PEER|
+ 	                       SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
+	                       nullptr);
+	SSL_CTX_set_verify_depth(ssl_ctx, 100);
+
+	SSL_CTX_set_mode(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
+
 #ifdef CIPHER_LIST
 	if (SSL_CTX_set_cipher_list(ssl_ctx, CIPHER_LIST) != 1)
 		return build_error("SSL_CTX_set_cipher_list:", -1);
 #endif
 
+	return 0;
+}
+
+
+static int post_connection_check(X509 *x509, const map<string, int> &hosts)
+{
+	X509_NAME *subj = X509_get_subject_name(x509);
+	if (!subj)
+		return -1;
+
+	int loc = -1;
+	X509_NAME_ENTRY *e = nullptr;
+	for (;;) {
+		loc = X509_NAME_get_index_by_NID(subj, NID_commonName, loc);
+		if (loc == -1 || loc == -2)
+			break;
+		e = X509_NAME_get_entry(subj, loc);		// e must not be freed
+		if (!e)
+			break;
+		ASN1_STRING *as = X509_NAME_ENTRY_get_data(e);
+		if (!as)
+			break;
+		int len = ASN1_STRING_length(as);
+		if (len < 0 || len > 0x1000)
+			return -1;
+		string s = string(reinterpret_cast<char *>(ASN1_STRING_data(as)), len);		// ASN1_STRING_data() must not be freed
+		if (hosts.count(s) > 0)
+			return 1;
+	}
 	return 0;
 }
 
@@ -136,24 +180,38 @@ int ssl_box::connect_ssl(const string &host)
 	// only set non blocking after SSL_connect()
 	fcntl(sock, F_SETFL, O_RDWR|O_NONBLOCK);
 
+	int err = 0;
+	if ((err = SSL_get_verify_result(ssl)) != X509_V_OK)
+		return build_error(X509_verify_cert_error_string(err), -1);
+
 	if ((x509 = SSL_get_peer_certificate(ssl)) == nullptr)
 		return build_error("SSL_get_peer_certificate", -1);
 
-	EVP_PKEY *peer_key = X509_get_pubkey(x509);
+	if (post_connection_check(x509, {{"dns.google.com", 1},  {"*.google.com", 1}}) != 1)
+		return build_error("SSL Post connection check failed. CN mismatch?", -1);
+
+	EVP_PKEY *peer_key = nullptr;
+	if (pinned.size() > 0)
+		peer_key = X509_get_pubkey(x509);
+
 	X509_free(x509);
-	if (!peer_key)
-		return build_error("No key inside peer X509?!", -1);
 
-	bool has = 0;
-	for (auto p : pinned) {
-		if (EVP_PKEY_cmp(p, peer_key) == 1)
-			has = 1;
+	if (pinned.size() > 0) {
+
+		if (!peer_key)
+			return build_error("No key inside peer X509?!", -1);
+
+		bool has = 0;
+		for (auto p : pinned) {
+			if (EVP_PKEY_cmp(p, peer_key) == 1)
+				has = 1;
+		}
+
+		EVP_PKEY_free(peer_key);
+
+		if (has != 1)
+			return build_error("Peer X509 not in pinned list!", -1);
 	}
-
-	EVP_PKEY_free(peer_key);
-
-	if (has != 1)
-		return build_error("Peer X509 not in pinned list!", -1);
 
 	return 0;
 }

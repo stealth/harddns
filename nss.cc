@@ -49,17 +49,19 @@ using namespace harddns;
 
 
 #if 0
-extern void harddns_init();
+extern "C" void harddns_init();
 
 int main(int argc, char **argv)
 {
 	map<string, int> v;
 	harddns_init();
 	string r = "";
+	uint32_t ttl = 0;
 
 	dnshttps d(ssl_conn);
-	if (d.get("kernel.org", AF_UNSPEC, v, r) < 0)
+	if (d.get("kernel.org", AF_UNSPEC, v, ttl, r) < 0)
 		printf("%s %s\n", d.why(), r.c_str());
+	printf("%s\n", r.c_str());
 }
 #endif
 
