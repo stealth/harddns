@@ -25,6 +25,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <string>
+#include <cstring>
 
 extern "C" {
 #include <openssl/ssl.h>
@@ -96,6 +97,10 @@ public:
 
 
 extern ssl_box *ssl_conn;
+
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L) || defined(LIBRESSL_VERSION_NUMBER)
+#define ASN1_STRING_get0_data(x) ASN1_STRING_data(x)
+#endif
 
 }
 

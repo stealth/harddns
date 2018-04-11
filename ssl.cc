@@ -20,6 +20,7 @@
 
 #include <string>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
@@ -95,7 +96,7 @@ int ssl_box::setup_ctx()
 {
 	const SSL_METHOD *method = nullptr;
 
-	if ((method = TLSv1_2_client_method()) == nullptr)
+	if ((method = SSLv23_client_method()) == nullptr)
 		return build_error("TLSv12_client_method", -1);
 
 	if ((ssl_ctx = SSL_CTX_new(method)) == nullptr)
@@ -105,7 +106,7 @@ int ssl_box::setup_ctx()
 	long op = SSL_OP_ALL|SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1;
 	op |= (SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET);
 
-	if ((SSL_CTX_set_options(ssl_ctx, op) & op) != op)
+	if ((unsigned long)(SSL_CTX_set_options(ssl_ctx, op) & op) != (unsigned long)op)
 		return build_error("SSL_CTX_set_options:", -1);
 
 	if (SSL_CTX_load_verify_locations(ssl_ctx, NULL, "/etc/ssl/certs") != 1)
@@ -152,7 +153,7 @@ static int post_connection_check(X509 *x509, const map<string, int> &hosts)
 		int len = ASN1_STRING_length(as);
 		if (len < 0 || len > 0x1000)
 			return -1;
-		string s = string(reinterpret_cast<char *>(ASN1_STRING_data(as)), len);		// ASN1_STRING_data() must not be freed
+		string s = string(reinterpret_cast<const char *>(ASN1_STRING_get0_data(as)), len);		// get0 must not be freed
 		if (hosts.count(s) > 0)
 			return 1;
 	}

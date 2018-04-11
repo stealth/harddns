@@ -146,13 +146,13 @@ int dnshttps::get(const string &name, int af, map<string, int> &result, uint32_t
 	}
 
 	string json = "";
-	if (cl > 0 && content_idx != string::npos)
+	if (cl > 0 && content_idx != string::npos) {
 		json = reply.substr(content_idx);
 		if (json.size() < cl) {
 			ssl->close();
 			return build_error("Incomplete read from server.", -1);
 		}
-	else {
+	} else {
 		idx = reply.find("\r\n\r\n");
 		if (idx == string::npos || idx + 4 >= reply.size()) {
 			ssl->close();
