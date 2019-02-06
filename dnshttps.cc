@@ -176,11 +176,13 @@ int dnshttps::get(const string &name, int af, map<string, int> &result, uint32_t
 			}
 		}
 
-		if (!has_answer || parse_json(name, af, result, ttl, raw, reply, content_idx, cl) < 0)
+		if (!has_answer)
 			ssl->close();
+		else if (parse_json(name, af, result, ttl, raw, reply, content_idx, cl) == 0)
+			return 0;
 	}
 
-	return 0;
+	return -1;
 }
 
 
