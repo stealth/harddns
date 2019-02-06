@@ -1,8 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016 by Sebastian Krahmer,
- *             sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2016-2019 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,6 +28,7 @@
 #include <stdint.h>
 #include <syslog.h>
 #include <netdb.h>
+#include <signal.h>
 #include <map>
 #include <mutex>
 #include <netinet/in.h>
@@ -72,8 +73,8 @@ mutex ssl_mtx;
  * they are almos equal, including their comments and asserts.
  */
 
-extern "C" enum nss_status
-_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result,
+static  enum nss_status
+do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result,
                               char *buffer, size_t buflen, int *errnop,
                               int *herrnop, int32_t *ttlp, char **canonp)
 {
@@ -174,9 +175,28 @@ _nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result,
 	return NSS_STATUS_SUCCESS;
 }
 
-#if 1 //HAVE_STRUCT_GAIH_ADDRTUPLE
+
 extern "C" enum nss_status
-_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
+_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result,
+                              char *buffer, size_t buflen, int *errnop,
+                              int *herrnop, int32_t *ttlp, char **canonp)
+{
+	struct sigaction new_sig, old_sig;
+	memset(&new_sig, 0, sizeof(new_sig));
+	new_sig.sa_handler = SIG_IGN;
+	sigaction(SIGPIPE, &new_sig, &old_sig);
+
+	enum nss_status r = do_nss_harddns_gethostbyname3_r(name, af, result, buffer, buflen, errnop, herrnop, ttlp, canonp);
+
+	sigaction(SIGPIPE, &old_sig, nullptr);
+	return r;
+}
+
+
+#if 1 //HAVE_STRUCT_GAIH_ADDRTUPLE
+
+static enum nss_status
+do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
                               char *buffer, size_t buflen, int *errnop,
                               int *herrnop, int32_t *ttlp)
 {
@@ -256,6 +276,25 @@ _nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 	*herrnop = NETDB_SUCCESS;
 	return NSS_STATUS_SUCCESS;
 }
+
+
+extern "C" enum nss_status
+_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
+                              char *buffer, size_t buflen, int *errnop,
+                              int *herrnop, int32_t *ttlp)
+{
+	struct sigaction new_sig, old_sig;
+	memset(&new_sig, 0, sizeof(new_sig));
+	new_sig.sa_handler = SIG_IGN;
+	sigaction(SIGPIPE, &new_sig, &old_sig);
+
+	enum nss_status r = do_nss_harddns_gethostbyname4_r(name, pat, buffer, buflen, errnop, herrnop, ttlp);
+
+	sigaction(SIGPIPE, &old_sig, nullptr);
+	return r;
+}
+
+
 #endif /* HAVE_STRUCT_GAIH_ADDRTUPLE */
 
 

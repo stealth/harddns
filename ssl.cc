@@ -28,6 +28,7 @@
 #include <arpa/inet.h>
 #include <map>
 #include "ssl.h"
+#include "config.h"
 
 extern "C" {
 #include <openssl/ssl.h>
@@ -74,7 +75,6 @@ static int tcp_connect(const char *host, uint16_t port = 443)
 
 
 ssl_box::ssl_box()
-	: sock(-1), ssl_ctx(nullptr), ssl(nullptr)
 {
 }
 
@@ -132,7 +132,7 @@ int ssl_box::setup_ctx()
 }
 
 
-static int post_connection_check(X509 *x509, const map<string, int> &hosts)
+static int post_connection_check(X509 *x509, const string &peer)
 {
 	X509_NAME *subj = X509_get_subject_name(x509);
 	if (!subj)
@@ -154,8 +154,12 @@ static int post_connection_check(X509 *x509, const map<string, int> &hosts)
 		if (len < 0 || len > 0x1000)
 			return -1;
 		string s = string(reinterpret_cast<const char *>(ASN1_STRING_get0_data(as)), len);		// get0 must not be freed
-		if (hosts.count(s) > 0)
-			return 1;
+
+		auto cfg = config::ns_cfg->find(peer);
+		if (cfg != config::ns_cfg->end()) {
+			if (s == cfg->second.cn)
+				return 1;
+		}
 	}
 	return 0;
 }
@@ -163,6 +167,8 @@ static int post_connection_check(X509 *x509, const map<string, int> &hosts)
 
 int ssl_box::connect_ssl(const string &host)
 {
+	ns_ip = host;
+
 	::close(sock);
 	if (ssl)
 		SSL_free(ssl);
@@ -188,7 +194,7 @@ int ssl_box::connect_ssl(const string &host)
 	if ((x509 = SSL_get_peer_certificate(ssl)) == nullptr)
 		return build_error("SSL_get_peer_certificate", -1);
 
-	if (post_connection_check(x509, {{"dns.google.com", 1},  {"*.google.com", 1}}) != 1)
+	if (post_connection_check(x509, ns_ip) != 1)
 		return build_error("SSL Post connection check failed. CN mismatch?", -1);
 
 	EVP_PKEY *peer_key = nullptr;
@@ -225,6 +231,7 @@ void ssl_box::close()
 	ssl = nullptr;
 	::close(sock);
 	sock = -1;
+	ns_ip = "";
 }
 
 

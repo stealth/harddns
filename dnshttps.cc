@@ -1,7 +1,7 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016-2018 by Sebastian Krahmer,
+ * (C) 2016-2019 by Sebastian Krahmer,
  *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
@@ -25,6 +25,7 @@
 #include <map>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <syslog.h>
 #include "dnshttps.h"
 #include "config.h"
 
@@ -60,10 +61,12 @@ static bool valid_name(const string &name)
 	return 1;
 }
 
+// https://developers.google.com/speed/public-dns/docs/dns-over-https
+// https://developers.cloudflare.com/1.1.1.1/dns-over-https
+// https://www.quad9.net/doh-quad9-dns-servers
 
 int dnshttps::get(const string &name, int af, map<string, int> &result, uint32_t &ttl, string &raw)
 {
-
 	result.clear();
 	raw = "";
 	ttl = 0;
@@ -74,107 +77,141 @@ int dnshttps::get(const string &name, int af, map<string, int> &result, uint32_t
 	if (!valid_name(name))
 		return build_error("Invalid FQDN", -1);
 
-	string req = "GET /resolve?name=" + name, reply = "", tmp = "";
-	req += "&edns_client_subnet=0.0.0.0/0";
-	if (af == AF_INET)
-		req += "&type=A";
-	else if (af == AF_INET6)
-		req += "&type=AAAA";
-	else
-		req += "&type=ANY";
+	for (unsigned int i = 0; i < config::ns->size(); ++i) {
 
-	req += " HTTP/1.1\r\nHost: dns.google.com\r\nUser-Agent: harddns 0.1\r\nConnection: Keep-Alive\r\n";
+		string ns = ssl->peer();
 
-	if (req.size() < 450)
-		req += "X-Igno: " + string('X', 450 - req.size());
+		if (ns.size() == 0)
+			ns = config::ns->front();
 
-	req += "\r\n\r\n";
+		const auto &cfg = config::ns_cfg->find(ns);
+		if (cfg == config::ns_cfg->end())
+			continue;
+		const string &get = cfg->second.get;
+		const string &host = cfg->second.host;
 
+		printf("%s %s %s %s\n", cfg->second.ip.c_str(), cfg->second.get.c_str(), cfg->second.host.c_str(), cfg->second.cn.c_str());
 
-	// maybe closed due to error or not initialized in the first place
-	if (ssl->send(req) < 0) {
-		if (ssl->connect_ssl(*config::ns) < 0)
-			return build_error("No SSL connection:" + string(ssl->why()), -1);
-		if (ssl->send(req) != (int)req.size()) {
-			ssl->close();
-			return build_error("Unable to complete request.", -1);
-		}
-	}
+		string req = "GET " + get + name, reply = "", tmp = "";
+//		req += "&edns_client_subnet=0.0.0.0/0";
+		if (af == AF_INET)
+			req += "&type=A";
+		else if (af == AF_INET6)
+			req += "&type=AAAA";
+		else
+			req += "&type=ANY";
 
-	string::size_type idx = string::npos, content_idx = string::npos;
-	size_t cl = 0;
-	int i = 0, maxtries = 3;
-	for (i = 0; i < maxtries; ++i) {
-		if (ssl->recv(tmp) < 0) {
-			ssl->close();
-			return build_error("Error when receiving reply:" + string(ssl->why()), -1);
-		}
-		reply += tmp;
+		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.2\r\nConnection: Keep-Alive\r\n";
 
-		if (reply.find("HTTP/1.1 200 OK") == string::npos) {
-			ssl->close();
-			return build_error("Error response from server.", -1);
-		}
+		if (req.size() < 450)
+			req += "X-Igno: " + string(450 - req.size(), 'X');
 
-		if (reply.find("Transfer-Encoding: chunked\r\n") != string::npos && reply.find("\r\n0\r\n\r\n") != string::npos)
-			break;
+		req += "\r\n\r\n";
 
-		if (cl == 0 && (idx = reply.find("Content-Length:")) != string::npos) {
-			idx += 15;
-			if (idx >= reply.size())
-				continue;
+		printf("%s\n", req.c_str());
 
-			cl = strtoul(reply.c_str() + idx, nullptr, 10);
-			if (cl > 65535) {
+		// maybe closed due to error or not initialized in the first place
+		if (ssl->send(req) < 0) {
+			ns = config::ns->front();
+			if (ssl->connect_ssl(ns) < 0) {
 				ssl->close();
-				return build_error("Insanely large reply.", -1);
+				syslog(LOG_INFO, "No SSL connection to %s (%s)", ns.c_str(), ssl->why());
+				continue;
+			}
+			if (ssl->send(req) != (int)req.size()) {
+				ssl->close();
+				syslog(LOG_INFO, "Unable to complete request to %s.", ns.c_str());
+				continue;
+			}
+
+			// cycle through list of DNS servers
+			config::ns->push_back(ns);
+			config::ns->pop_front();
+		}
+
+		string::size_type idx = string::npos, content_idx = string::npos;
+		size_t cl = 0;
+		const int maxtries = 3;
+		bool has_answer = 0;
+
+		for (int j = 0; j < maxtries; ++j) {
+			if (ssl->recv(tmp) < 0) {
+				ssl->close();
+				syslog(LOG_INFO, "Error when receiving reply from %s (%s)", ns.c_str(), ssl->why());
+				break;
+			}
+			reply += tmp;
+
+			if (reply.find("HTTP/1.1 200 OK") == string::npos) {
+				ssl->close();
+				syslog(LOG_INFO, "Error response from %s.", ns.c_str());
+				break;
+			}
+
+			if (reply.find("Transfer-Encoding: chunked\r\n") != string::npos && reply.find("\r\n0\r\n\r\n") != string::npos) {
+				has_answer = 1;
+				break;
+			}
+
+			if (cl == 0 && (idx = reply.find("Content-Length:")) != string::npos) {
+				idx += 15;
+				if (idx >= reply.size())
+					continue;
+
+				cl = strtoul(reply.c_str() + idx, nullptr, 10);
+				if (cl > 65535) {
+					ssl->close();
+					syslog(LOG_INFO, "Insanely large reply from %s", ns.c_str());
+					break;
+				}
+			}
+
+			if (cl > 0 && (content_idx = reply.find("\r\n\r\n")) != string::npos) {
+				content_idx += 4;
+				if (content_idx <= reply.size() && reply.size() - content_idx < cl)
+					continue;
+
+				has_answer = 1;
+				break;
 			}
 		}
 
-		if (cl > 0 && (content_idx = reply.find("\r\n\r\n")) != string::npos) {
-			content_idx += 4;
-			if (content_idx <= reply.size() && reply.size() - content_idx < cl)
-				continue;
-
-			break;
-		}
+		if (!has_answer || parse_json(name, af, result, ttl, raw, reply, content_idx, cl) < 0)
+			ssl->close();
 	}
 
-	if (i == maxtries) {
-		ssl->close();
-		return build_error("Reply did not arrive in time.", -1);
-	}
+	return 0;
+}
 
-	string json = "";
+
+
+int dnshttps::parse_json(const string &name, int af, map<string, int> &result, uint32_t &ttl, string &raw, const string &reply, string::size_type content_idx, size_t cl)
+{
+	string::size_type idx = string::npos;
+	string json = "", tmp = "";
+
 	if (cl > 0 && content_idx != string::npos) {
 		json = reply.substr(content_idx);
-		if (json.size() < cl) {
-			ssl->close();
+		if (json.size() < cl)
 			return build_error("Incomplete read from server.", -1);
-		}
 	} else {
+		// parse chunked encoding
 		idx = reply.find("\r\n\r\n");
-		if (idx == string::npos || idx + 4 >= reply.size()) {
-			ssl->close();
+		if (idx == string::npos || idx + 4 >= reply.size())
 			return build_error("Invalid reply.", -1);
-		}
 		idx += 4;
 		for (;;) {
 			string::size_type nl = reply.find("\r\n", idx);
-			if (nl == string::npos || nl + 2 > reply.size()) {
-				ssl->close();
+			if (nl == string::npos || nl + 2 > reply.size())
 				return build_error("Invalid reply.", -1);
-			}
 			cl = strtoul(reply.c_str() + idx, nullptr, 16);
 
 			// end of chunk?
 			if (cl == 0)
 				break;
 
-			if (cl > 65535 || nl + 2 + cl > reply.size()) {
-				ssl->close();
+			if (cl > 65535 || nl + 2 + cl > reply.size())
 				return build_error("Invalid reply.", -1);
-			}
 			idx = nl + 2;
 			json += reply.substr(idx, cl);
 			idx += cl + 2;

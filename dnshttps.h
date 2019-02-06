@@ -1,8 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016 by Sebastian Krahmer,
- *             sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2016-2019 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -53,6 +53,7 @@ class dnshttps {
 		return r;
 	}
 
+	int parse_json(const std::string &, int, std::map<std::string, int> &, uint32_t &, std::string &, const std::string &, std::string::size_type, size_t);
 
 public:
 
@@ -63,6 +64,7 @@ public:
 
 	virtual ~dnshttps()
 	{
+		// don't delete ssl
 	}
 
 	const char *why()
@@ -71,6 +73,7 @@ public:
 	}
 
 	int get(const std::string &, int, std::map<std::string, int> &, uint32_t &, std::string &);
+
 };
 
 

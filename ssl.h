@@ -1,8 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016 by Sebastian Krahmer,
- *             sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2016-2019 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -40,13 +40,13 @@ namespace harddns {
 class ssl_box {
 
 private:
-	int sock;
+	int sock{-1};
 
 	std::vector<EVP_PKEY *> pinned;
-	SSL_CTX *ssl_ctx;
-	SSL *ssl;
+	SSL_CTX *ssl_ctx{nullptr};
+	SSL *ssl{nullptr};
 
-	std::string err;
+	std::string err{""}, ns_ip{""};
 
 	template<class T>
 	T build_error(const std::string &msg, T r)
@@ -93,6 +93,11 @@ public:
 	ssize_t recv(std::string &, long to = 1000000000);
 
 	void close();
+
+	std::string peer()
+	{
+		return ns_ip;
+	}
 };
 
 

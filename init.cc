@@ -1,8 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016 by Sebastian Krahmer,
- *             sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2016-2019 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -89,5 +89,16 @@ extern "C" void harddns_init()
 	harddns::dns = new (nothrow) harddns::dnshttps(harddns::ssl_conn);
 
 	openlog("harddns", LOG_NDELAY|LOG_PID, LOG_DAEMON);
+}
+
+
+extern "C" void harddns_init() __attribute__((destructor));
+extern "C" void harddns_fini()
+{
+	delete harddns::ssl_conn;
+	delete harddns::dns;
+
+	delete harddns::config::ns;
+	delete harddns::config::ns_cfg;
 }
 

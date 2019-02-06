@@ -1,8 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016 by Sebastian Krahmer,
- *             sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2016-2019 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,7 +22,10 @@
 #include <cstring>
 #include <algorithm>
 #include <string>
+#include <list>
+#include <map>
 #include <unistd.h>
+#include "config.h"
 
 
 namespace harddns {
@@ -36,7 +39,9 @@ using namespace std;
 // must be pointers, as the C++ environment may not be set up
 // already (global "string" variables properly initialized) when we parse
 // and asign to here
-string *ns = nullptr;
+list<string> *ns = nullptr;
+map<string, struct a_ns_cfg> *ns_cfg = nullptr;
+
 bool log_requests = 0;
 
 
@@ -45,13 +50,15 @@ int parse_config(const string &cfgbase)
 	char buf[1024] = {0};
 	FILE *f	= nullptr;
 
-	if (!(ns = new (nothrow) string("")))
+	if (!(ns = new (nothrow) list<string>))
+		return -1;
+	if (!(ns_cfg = new (nothrow) map<string, struct a_ns_cfg>))
 		return -1;
 
 	if (!(f = fopen((cfgbase + "/harddns.conf").c_str(), "r")))
 		return -1;
 
-	string sline = "";
+	string sline = "", ns = "";
 
 	for (;!feof(f);) {
 		memset(buf, 0, sizeof(buf));
@@ -64,9 +71,17 @@ int parse_config(const string &cfgbase)
 
 		if (sline.find("log_requests") == 0)
 			config::log_requests = 1;
-		else if (sline.find("nameserver=") == 0)
-			*config::ns = sline.substr(11);
-
+		else if (sline.find("nameserver=") == 0) {
+			ns = sline.substr(11);
+			config::ns->push_back(ns);
+			config::ns_cfg->insert(make_pair(ns, a_ns_cfg{ns, "no-cn", "no-host", "no-get"}));
+		} else if (sline.find("cn=") == 0) {
+			config::ns_cfg->find(ns)->second.cn = sline.substr(3);
+		} else if (sline.find("host=") == 0) {
+			config::ns_cfg->find(ns)->second.host = sline.substr(5);
+		} else if (sline.find("get=") == 0) {
+			config::ns_cfg->find(ns)->second.get = sline.substr(4);
+		}
 	}
 
 	fclose(f);
@@ -76,3 +91,4 @@ int parse_config(const string &cfgbase)
 }	// namespace
 
 }	// namespace
+
