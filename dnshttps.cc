@@ -65,7 +65,7 @@ static bool valid_name(const string &name)
 // https://developers.cloudflare.com/1.1.1.1/dns-over-https
 // https://www.quad9.net/doh-quad9-dns-servers
 
-int dnshttps::get(const string &name, int af, map<string, int> &result, uint32_t &ttl, string &raw)
+int dnshttps::get(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw)
 {
 	result.clear();
 	raw = "";
@@ -90,7 +90,7 @@ int dnshttps::get(const string &name, int af, map<string, int> &result, uint32_t
 		const string &get = cfg->second.get;
 		const string &host = cfg->second.host;
 
-		printf("%s %s %s %s\n", cfg->second.ip.c_str(), cfg->second.get.c_str(), cfg->second.host.c_str(), cfg->second.cn.c_str());
+		printf(">>>> %s %s %s %s\n", cfg->second.ip.c_str(), cfg->second.get.c_str(), cfg->second.host.c_str(), cfg->second.cn.c_str());
 
 		string req = "GET " + get + name, reply = "", tmp = "";
 //		req += "&edns_client_subnet=0.0.0.0/0";
@@ -101,6 +101,8 @@ int dnshttps::get(const string &name, int af, map<string, int> &result, uint32_t
 		else
 			req += "&type=ANY";
 
+req += "&RD=1";
+
 		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.2\r\nConnection: Keep-Alive\r\n";
 
 		if (req.size() < 450)
@@ -108,7 +110,7 @@ int dnshttps::get(const string &name, int af, map<string, int> &result, uint32_t
 
 		req += "\r\n\r\n";
 
-		printf("%s\n", req.c_str());
+		printf(">>>> %s\n", req.c_str());
 
 		// maybe closed due to error or not initialized in the first place
 		if (ssl->send(req) < 0) {
@@ -187,7 +189,7 @@ int dnshttps::get(const string &name, int af, map<string, int> &result, uint32_t
 
 
 
-int dnshttps::parse_json(const string &name, int af, map<string, int> &result, uint32_t &ttl, string &raw, const string &reply, string::size_type content_idx, size_t cl)
+int dnshttps::parse_json(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw, const string &reply, string::size_type content_idx, size_t cl)
 {
 	string::size_type idx = string::npos;
 	string json = "", tmp = "";
@@ -222,6 +224,8 @@ int dnshttps::parse_json(const string &name, int af, map<string, int> &result, u
 
 	raw = json;
 
+	printf(">>>> %s\n", raw.c_str());
+
 	// Who needs boost property tree json parsers??
 	// Turns out, C++ data structures were not really made for JSON. Maybe CORBA...
 	json.erase(remove(json.begin(), json.end(), ' '), json.end());
@@ -236,7 +240,6 @@ int dnshttps::parse_json(const string &name, int af, map<string, int> &result, u
 	char data[16] = {0};
 	string::size_type idx2 = 0;
 
-#ifdef STRICT_ANSWER
 	string::size_type aidx = idx;
 
 	string v4a = "\"name\":\"" + name;
@@ -248,6 +251,11 @@ int dnshttps::parse_json(const string &name, int af, map<string, int> &result, u
 	if (name[name.size() - 1] != '.')
 		v6a += ".";
 	v6a += "\",\"type\":28,\"TTL\":";
+
+	string cname = "\"name\":\"" + name;
+	if (name[name.size() - 1] != '.')
+		cname += ".";
+	cname += "\",\"type\":5,\"TTL\":";
 
 	for (;af == AF_INET || af == AF_UNSPEC;) {
 		if ((idx = json.find(v4a, idx)) == string::npos)
@@ -264,8 +272,10 @@ int dnshttps::parse_json(const string &name, int af, map<string, int> &result, u
 			break;
 		tmp = json.substr(idx, idx2 - idx);
 		idx = idx2;
-		if (inet_pton(AF_INET, tmp.c_str(), data) == 1)
-			result[string(data, 4)] = AF_INET;
+		if (inet_pton(AF_INET, tmp.c_str(), data) == 1) {
+			printf(">>>> AF_INET -> %s\n", tmp.c_str());
+			result[string(data, 4)] = "A";
+		}
 	}
 
 	idx = aidx;
@@ -285,12 +295,22 @@ int dnshttps::parse_json(const string &name, int af, map<string, int> &result, u
 			break;
 		tmp = json.substr(idx, idx2 - idx);
 		idx = idx2;
-		if (inet_pton(AF_INET6, tmp.c_str(), data) == 1)
-			result[string(data, 16)] = AF_INET6;
+		if (inet_pton(AF_INET6, tmp.c_str(), data) == 1) {
+			printf(">>>> AF_INET6 -> %s\n", tmp.c_str());
+			result[string(data, 16)] = "AAAA";
+		}
 	}
 
-#else
-	for (;;) {
+	idx = aidx;
+
+	for (; af == AF_UNSPEC;) {
+		if ((idx = json.find(cname, idx)) == string::npos)
+			break;
+		idx += cname.size();
+
+		// take first ttl
+		if (ttl == 0)
+			ttl = strtoul(json.c_str() + idx, nullptr, 10);
 		if ((idx = json.find("\"data\":\"", idx)) == string::npos)
 			break;
 		idx += 8;
@@ -298,13 +318,9 @@ int dnshttps::parse_json(const string &name, int af, map<string, int> &result, u
 			break;
 		tmp = json.substr(idx, idx2 - idx);
 		idx = idx2;
-		if (inet_pton(AF_INET, tmp.c_str(), data) == 1) {
-			result[string(data, 4)] = AF_INET;
-		} else if (inet_pton(AF_INET6, tmp.c_str(), data) == 1) {
-			result[string(data, 16)] = AF_INET6;
-		}
+		result[tmp] = "CNAME";
+		printf(">>>> CNAME -> %s\n", tmp.c_str());
 	}
-#endif
 
 	if (ttl > 60*60)
 		ttl = 60*60;

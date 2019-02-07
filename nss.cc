@@ -70,7 +70,7 @@ int main(int argc, char **argv)
 mutex ssl_mtx;
 
 /* Most of the alloc/idx code was taken from libvirt and systemd-resolv nss modules. Interestingly
- * they are almos equal, including their comments and asserts.
+ * they are almost equal, including their comments and asserts.
  */
 
 static  enum nss_status
@@ -79,17 +79,18 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
                               int *herrnop, int32_t *ttlp, char **canonp)
 {
 	uint32_t ttl = 0;
-	char *r_name, **r_aliases, *r_addr, **r_addr_list;
-	size_t naddr = 0, i = 0;
-	size_t nameLen = 0, need = 0, idx = 0;
+	char *r_name, *r_alias, **r_aliases, *r_addr, **r_addr_list;
+	size_t naddr = 0, cnames = 0, i = 0;
+	size_t nameLen = 0, need = 0, idx = 0, cname_len = 0;
 	int alen = 4;
 
-	if (af == AF_UNSPEC)
-		af = AF_INET;
+	if (af != AF_INET6 && af != AF_INET)
+		return NSS_STATUS_NOTFOUND;
+
 	if (af == AF_INET6)
 		alen = 16;
 
-	map<string, int> res;
+	map<string, string> res;
 	string raw = "";
 	{
 	lock_guard<mutex> g(ssl_mtx);
@@ -103,9 +104,20 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 	}
 
 	if (config::log_requests)
-		syslog(LOG_INFO, "%s A%s? -> %s", name, (af == AF_INET)?"":"AAA", raw.c_str());
+		syslog(LOG_INFO, "%s %d? -> %s", name, af, raw.c_str());
 
-	if ((naddr = res.size()) == 0)
+	for (auto j = res.begin(); j != res.end(); ++j) {
+		if (af == AF_INET && j->second == "A")
+			++naddr;
+		if (af == AF_INET6 && j->second == "AAAA")
+			++naddr;
+		if (j->second == "CNAME") {
+			cname_len += ALIGN(j->first.size() + 1);
+			++cnames;
+		}
+	}
+
+	if (naddr == 0)
 		return NSS_STATUS_NOTFOUND;
 
 	/* Found and have data */
@@ -117,7 +129,7 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 	 * b) alias
 	 * c) addresses
 	 * d) nullptr stem */
-	need = ALIGN(nameLen + 1) + naddr * ALIGN(alen) + (naddr + 2) * sizeof(char *);
+	need = ALIGN(nameLen + 1) + cname_len + (cnames + 1) * sizeof(char *) + naddr * ALIGN(alen) + (naddr + 2) * sizeof(char *);
 
 	if (buflen < need) {
 		*errnop = ENOMEM;
@@ -130,16 +142,30 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 	memcpy(r_name, name, nameLen + 1);
 	idx = ALIGN(nameLen + 1);
 
-	/* Second, create empty aliases array */
-	r_aliases = reinterpret_cast<char **>(buffer + idx);
-	r_aliases[0] = nullptr;
+	/* Second, create aliases array and aliases double ptr */
+	r_alias = buffer + idx;
+	r_aliases = reinterpret_cast<char **>(buffer + idx + cname_len);
+	i = 0;
+	for (auto j = res.begin(); j != res.end(); ++j) {
+		if (j->second != "CNAME")
+			continue;
+		memcpy(r_alias + idx, j->first.c_str(), j->first.size() + 1);	// includes \0 terminator
+		r_aliases[i++] = r_alias + idx;
+		idx += ALIGN(j->first.size() + 1);
+	}
+
+	r_aliases[i] = nullptr;
 	idx += sizeof(char *);
 
 	/* Third, append addresses */
 	r_addr = buffer + idx;
+	i = 0;
 	for (auto j = res.begin(); j != res.end(); ++j) {
-		if (j->second == af)
-			memcpy(r_addr + i*ALIGN(alen), j->first.c_str(), alen);
+		if (af == AF_INET && j->second != "A")
+			continue;
+		if (af == AF_INET6 && j->second != "AAAA")
+			continue;
+		memcpy(r_addr + i*ALIGN(alen), j->first.data(), alen);
 		++i;
 	}
 
@@ -201,12 +227,12 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
                               int *herrnop, int32_t *ttlp)
 {
 	uint32_t ttl = 0;
-	size_t naddr;
+	size_t naddr = 0;
 	size_t nameLen, need, idx = 0;
 	struct gaih_addrtuple *r_tuple, *r_tuple_first = nullptr;
 	char *r_name;
 
-	map<string, int> res;
+	map<string, string> res;
 	string raw = "";
 
 	{
@@ -220,7 +246,11 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 
 	}
 
-	if ((naddr = res.size()) == 0)
+	for (auto j = res.begin(); j != res.end(); ++j) {
+		if (j->second == "A" || j->second == "AAAA")
+			++naddr;
+	}
+	if (naddr == 0)
 		return NSS_STATUS_NOTFOUND;
 
 	if (config::log_requests)
@@ -251,16 +281,18 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 	size_t j = 0;
 	r_tuple_first = reinterpret_cast<struct gaih_addrtuple *>(buffer + idx);
 	for (auto i = res.begin(); i != res.end(); ++i) {
+		if (i->second != "A" && i->second != "AAAA")
+			continue;
 		r_tuple = reinterpret_cast<struct gaih_addrtuple *>(buffer + idx);
-		if (++j == res.size())
+		if (++j == naddr)
 			r_tuple->next = nullptr;
 		else
-			r_tuple->next =  reinterpret_cast<struct gaih_addrtuple *>(buffer + idx + ALIGN(sizeof(struct gaih_addrtuple)));
+			r_tuple->next = reinterpret_cast<struct gaih_addrtuple *>(buffer + idx + ALIGN(sizeof(struct gaih_addrtuple)));
 		idx += ALIGN(sizeof(struct gaih_addrtuple));
 		r_tuple->name = r_name;
-		r_tuple->family = i->second;
+		r_tuple->family = i->second == "A" ? AF_INET : AF_INET6;
 		r_tuple->scopeid = 0;
-		memcpy(r_tuple->addr, i->first.c_str(), i->first.size());
+		memcpy(r_tuple->addr, i->first.data(), i->first.size());
 	}
 
 	if (*pat)
