@@ -1,5 +1,5 @@
 CXX=c++
-DEF=-DSTRICT_ANSWER
+DEF=
 INC=
 CXXFLAGS=-c -Wall -O2 -std=c++11 -pedantic -fPIC
 LIB=-lcrypto -lssl

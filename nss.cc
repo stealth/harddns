@@ -79,33 +79,50 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
                               int *herrnop, int32_t *ttlp, char **canonp)
 {
 	uint32_t ttl = 0;
-	char *r_name, *r_alias, **r_aliases, *r_addr, **r_addr_list;
+	char *r_name = nullptr, *r_alias = nullptr, **r_aliases = nullptr, *r_addr = nullptr, **r_addr_list = nullptr;
 	size_t naddr = 0, cnames = 0, i = 0;
 	size_t nameLen = 0, need = 0, idx = 0, cname_len = 0;
 	int alen = 4;
 
 	if (af != AF_INET6 && af != AF_INET)
-		return NSS_STATUS_NOTFOUND;
+		return NSS_STATUS_TRYAGAIN;
 
 	if (af == AF_INET6)
 		alen = 16;
 
 	map<string, string> res;
 	string raw = "";
+
 	{
-	lock_guard<mutex> g(ssl_mtx);
+		lock_guard<mutex> g(ssl_mtx);
 
-	if (!dns || dns->get(name, af, res, ttl, raw) < 0) {
-		if (dns)
-			syslog(LOG_INFO, "%s", dns->why());
-		return NSS_STATUS_TRYAGAIN;
-	}
+		if (!dns)
+			return NSS_STATUS_TRYAGAIN;
 
+		// up to 3 levels of DNS recursion
+		string s = name;
+		for (i = 0; s.size() > 0 && naddr == 0 && i < 3; ++i) {
+			printf(">>>> GET %s\n", s.c_str());
+			if (dns->get(s, af, res, ttl, raw) < 0) {
+				syslog(LOG_INFO, "%s", dns->why());
+				return NSS_STATUS_TRYAGAIN;
+			}
+			s = "";
+			for (auto j = res.begin(); j != res.end(); ++j) {
+				if (af == AF_INET && j->second == "A")
+					++naddr;
+				if (af == AF_INET6 && j->second == "AAAA")
+					++naddr;
+				if (j->second == "CNAME")
+					s = j->first;
+			}
+		}
 	}
 
 	if (config::log_requests)
 		syslog(LOG_INFO, "%s %d? -> %s", name, af, raw.c_str());
 
+	naddr = 0;
 	for (auto j = res.begin(); j != res.end(); ++j) {
 		if (af == AF_INET && j->second == "A")
 			++naddr;
@@ -228,24 +245,41 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 {
 	uint32_t ttl = 0;
 	size_t naddr = 0;
-	size_t nameLen, need, idx = 0;
-	struct gaih_addrtuple *r_tuple, *r_tuple_first = nullptr;
-	char *r_name;
+	size_t nameLen = 0, need = 0, idx = 0;
+	struct gaih_addrtuple *r_tuple = nullptr, *r_tuple_first = nullptr;
+	char *r_name = nullptr;
 
 	map<string, string> res;
 	string raw = "";
 
 	{
-	lock_guard<mutex> g(ssl_mtx);
+		lock_guard<mutex> g(ssl_mtx);
 
-	if (!dns || dns->get(name, AF_UNSPEC, res, ttl, raw) < 0) {
-		if (dns)
-			syslog(LOG_INFO, "%s", dns->why());
-		return NSS_STATUS_TRYAGAIN;
+		if (!dns)
+			return NSS_STATUS_TRYAGAIN;
+
+		// up to 3 levels of DNS CNAME recursion
+		string s = name;
+		for (int i = 0; s.size() > 0 && naddr == 0 && i < 3; ++i) {
+			if (dns->get(s, AF_INET, res, ttl, raw) < 0) {
+				syslog(LOG_INFO, "%s", dns->why());
+				return NSS_STATUS_TRYAGAIN;
+			}
+			if (dns->get(s, AF_INET6, res, ttl, raw) < 0) {
+				syslog(LOG_INFO, "%s", dns->why());
+				return NSS_STATUS_TRYAGAIN;
+			}
+			s = "";
+			for (auto j = res.begin(); j != res.end(); ++j) {
+				if (j->second == "A" || j->second == "AAAA")
+					++naddr;
+				if (j->second == "CNAME")
+					s = j->first;
+			}
+		}
 	}
 
-	}
-
+	naddr = 0;
 	for (auto j = res.begin(); j != res.end(); ++j) {
 		if (j->second == "A" || j->second == "AAAA")
 			++naddr;
@@ -278,21 +312,21 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 	idx = ALIGN(nameLen + 1);
 
 	/* Second, append addresses */
-	size_t j = 0;
+	size_t i = 0;
 	r_tuple_first = reinterpret_cast<struct gaih_addrtuple *>(buffer + idx);
-	for (auto i = res.begin(); i != res.end(); ++i) {
-		if (i->second != "A" && i->second != "AAAA")
+	for (auto j = res.begin(); j != res.end(); ++j) {
+		if (j->second != "A" && j->second != "AAAA")
 			continue;
 		r_tuple = reinterpret_cast<struct gaih_addrtuple *>(buffer + idx);
-		if (++j == naddr)
+		if (++i == naddr)
 			r_tuple->next = nullptr;
 		else
 			r_tuple->next = reinterpret_cast<struct gaih_addrtuple *>(buffer + idx + ALIGN(sizeof(struct gaih_addrtuple)));
 		idx += ALIGN(sizeof(struct gaih_addrtuple));
 		r_tuple->name = r_name;
-		r_tuple->family = i->second == "A" ? AF_INET : AF_INET6;
+		r_tuple->family = j->second == "A" ? AF_INET : AF_INET6;
 		r_tuple->scopeid = 0;
-		memcpy(r_tuple->addr, i->first.data(), i->first.size());
+		memcpy(r_tuple->addr, j->first.data(), j->first.size());
 	}
 
 	if (*pat)

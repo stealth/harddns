@@ -67,9 +67,9 @@ static bool valid_name(const string &name)
 
 int dnshttps::get(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw)
 {
-	result.clear();
+	// don't:
+	//result.clear();
 	raw = "";
-	ttl = 0;
 
 	if (!ssl || !config::ns)
 		return build_error("Not properly initialized.", -1);
@@ -100,8 +100,6 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 			req += "&type=AAAA";
 		else
 			req += "&type=ANY";
-
-req += "&RD=1";
 
 		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.2\r\nConnection: Keep-Alive\r\n";
 
@@ -180,8 +178,26 @@ req += "&RD=1";
 
 		if (!has_answer)
 			ssl->close();
-		else if (parse_json(name, af, result, ttl, raw, reply, content_idx, cl) == 0)
+		else if (parse_json(name, af, result, ttl, raw, reply, content_idx, cl) == 0) {
+
+			// Try to also resolve CNAME inside same answer if no A/AAAA was found
+			string cname = "";
+			if (af == AF_INET || af == AF_INET6) {
+				for (auto ans = result.begin(); ans != result.end(); ++ans) {
+					if (af == AF_INET && ans->second == "A")
+						return 0;
+					if (af == AF_INET6 && ans->second == "AAAA")
+						return 0;
+					if (ans->second == "CNAME")
+						cname = ans->first;
+				}
+				// not here if A or AAAA was found. So, trying to find CNAME A/AAAA glue record
+				// in the same answer
+				if (cname.size() > 0)
+					parse_json(cname, af, result, ttl, raw, reply, content_idx, cl);
+			}
 			return 0;
+		}
 	}
 
 	return -1;
@@ -303,7 +319,7 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 
 	idx = aidx;
 
-	for (; af == AF_UNSPEC;) {
+	for (;;) {
 		if ((idx = json.find(cname, idx)) == string::npos)
 			break;
 		idx += cname.size();
