@@ -1,7 +1,7 @@
 harddns nss module
 ==================
 
-aka Hardy Mc Hardns NSS module for using publoc DoH (DNS over HTTPS) in your system
+aka Hardy Mc Hardns NSS module for using public DoH (DNS over HTTPS) in your system
 resolving (for Linux).
 
 Build
