@@ -81,8 +81,13 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 
 		string ns = ssl->peer();
 
-		if (ns.size() == 0)
+		if (ns.size() == 0) {
 			ns = config::ns->front();
+
+			// cycle through list of DNS servers
+			config::ns->push_back(ns);
+			config::ns->pop_front();
+		}
 
 		const auto &cfg = config::ns_cfg->find(ns);
 		if (cfg == config::ns_cfg->end())
@@ -90,7 +95,7 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 		const string &get = cfg->second.get;
 		const string &host = cfg->second.host;
 
-		printf(">>>> %s %s %s %s\n", cfg->second.ip.c_str(), cfg->second.get.c_str(), cfg->second.host.c_str(), cfg->second.cn.c_str());
+		//printf(">>>> %s %s %s %s\n", cfg->second.ip.c_str(), cfg->second.get.c_str(), cfg->second.host.c_str(), cfg->second.cn.c_str());
 
 		string req = "GET " + get + name, reply = "", tmp = "";
 //		req += "&edns_client_subnet=0.0.0.0/0";
@@ -108,11 +113,10 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 
 		req += "\r\n\r\n";
 
-		printf(">>>> %s\n", req.c_str());
+		//printf(">>>> %s\n", req.c_str());
 
 		// maybe closed due to error or not initialized in the first place
 		if (ssl->send(req) < 0) {
-			ns = config::ns->front();
 			if (ssl->connect_ssl(ns) < 0) {
 				ssl->close();
 				syslog(LOG_INFO, "No SSL connection to %s (%s)", ns.c_str(), ssl->why());
@@ -123,10 +127,6 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 				syslog(LOG_INFO, "Unable to complete request to %s.", ns.c_str());
 				continue;
 			}
-
-			// cycle through list of DNS servers
-			config::ns->push_back(ns);
-			config::ns->pop_front();
 		}
 
 		string::size_type idx = string::npos, content_idx = string::npos;
@@ -178,36 +178,21 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 
 		if (!has_answer)
 			ssl->close();
-		else if (parse_json(name, af, result, ttl, raw, reply, content_idx, cl) == 0) {
-
-			// Try to also resolve CNAME inside same answer if no A/AAAA was found
-			string cname = "";
-			if (af == AF_INET || af == AF_INET6) {
-				for (auto ans = result.begin(); ans != result.end(); ++ans) {
-					if (af == AF_INET && ans->second == "A")
-						return 0;
-					if (af == AF_INET6 && ans->second == "AAAA")
-						return 0;
-					if (ans->second == "CNAME")
-						cname = ans->first;
-				}
-				// not here if A or AAAA was found. So, trying to find CNAME A/AAAA glue record
-				// in the same answer
-				if (cname.size() > 0)
-					parse_json(cname, af, result, ttl, raw, reply, content_idx, cl);
-			}
-			return 0;
+		else {
+			return parse_json(name, af, result, ttl, raw, reply, content_idx, cl);
 		}
 	}
 
-	return -1;
+	return 0;
 }
 
 
 
 int dnshttps::parse_json(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw, const string &reply, string::size_type content_idx, size_t cl)
 {
-	string::size_type idx = string::npos;
+	bool has_answer = 0;
+
+	string::size_type idx = string::npos, idx2 = string::npos, aidx = string::npos;
 	string json = "", tmp = "";
 
 	if (cl > 0 && content_idx != string::npos) {
@@ -240,7 +225,7 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 
 	raw = json;
 
-	printf(">>>> %s\n", raw.c_str());
+	//printf(">>>> %s @ %s\n", name.c_str(), raw.c_str());
 
 	// Who needs boost property tree json parsers??
 	// Turns out, C++ data structures were not really made for JSON. Maybe CORBA...
@@ -250,76 +235,18 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 		return 0;
 	if ((idx = json.find("\"Answer\":[")) == string::npos)
 		return 0;
-
-
 	idx += 10;
-	char data[16] = {0};
-	string::size_type idx2 = 0;
+	aidx = idx;
 
-	string::size_type aidx = idx;
+	// first of all, find all CNAMEs
+	vector<string> fqdns{name};
+	string s = name;
+	for (int level = 0; level < 10; ++level) {
+		string cname = "\"name\":\"" + s;
+		if (s[s.size() - 1] != '.')
+			cname += ".";
+		cname += "\",\"type\":5,\"TTL\":";
 
-	string v4a = "\"name\":\"" + name;
-	if (name[name.size() - 1] != '.')
-		v4a += ".";
-	v4a += "\",\"type\":1,\"TTL\":";
-
-	string v6a = "\"name\":\"" + name;
-	if (name[name.size() - 1] != '.')
-		v6a += ".";
-	v6a += "\",\"type\":28,\"TTL\":";
-
-	string cname = "\"name\":\"" + name;
-	if (name[name.size() - 1] != '.')
-		cname += ".";
-	cname += "\",\"type\":5,\"TTL\":";
-
-	for (;af == AF_INET || af == AF_UNSPEC;) {
-		if ((idx = json.find(v4a, idx)) == string::npos)
-			break;
-		idx += v4a.size();
-
-		// take first ttl
-		if (ttl == 0)
-			ttl = strtoul(json.c_str() + idx, nullptr, 10);
-		if ((idx = json.find("\"data\":\"", idx)) == string::npos)
-			break;
-		idx += 8;
-		if ((idx2 = json.find("\"", idx)) == string::npos)
-			break;
-		tmp = json.substr(idx, idx2 - idx);
-		idx = idx2;
-		if (inet_pton(AF_INET, tmp.c_str(), data) == 1) {
-			printf(">>>> AF_INET -> %s\n", tmp.c_str());
-			result[string(data, 4)] = "A";
-		}
-	}
-
-	idx = aidx;
-
-	for (;af == AF_INET6 || af == AF_UNSPEC;) {
-		if ((idx = json.find(v6a, idx)) == string::npos)
-			break;
-		idx += v6a.size();
-
-		// take first ttl
-		if (ttl == 0)
-			ttl = strtoul(json.c_str() + idx, nullptr, 10);
-		if ((idx = json.find("\"data\":\"", idx)) == string::npos)
-			break;
-		idx += 8;
-		if ((idx2 = json.find("\"", idx)) == string::npos)
-			break;
-		tmp = json.substr(idx, idx2 - idx);
-		idx = idx2;
-		if (inet_pton(AF_INET6, tmp.c_str(), data) == 1) {
-			printf(">>>> AF_INET6 -> %s\n", tmp.c_str());
-			result[string(data, 16)] = "AAAA";
-		}
-	}
-
-	idx = aidx;
-
-	for (;;) {
 		if ((idx = json.find(cname, idx)) == string::npos)
 			break;
 		idx += cname.size();
@@ -334,14 +261,86 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 			break;
 		tmp = json.substr(idx, idx2 - idx);
 		idx = idx2;
+		if (!valid_name(tmp))
+			return build_error("Invalid DNS name.", -1);
+
 		result[tmp] = "CNAME";
-		printf(">>>> CNAME -> %s\n", tmp.c_str());
+		fqdns.push_back(tmp);
+		//printf(">>>> CNAME %s -> %s\n", s.c_str(), tmp.c_str());
+		s = tmp;
+	}
+
+	idx = aidx;
+
+	// now for the A and AAAA records for original name and all CNAMEs
+	for (auto it = fqdns.begin(); it != fqdns.end(); ++it) {
+
+		//printf(">>>> A/AAAA for %s\n", it->c_str());
+
+		char data[16] = {0};
+
+		string v4a = "\"name\":\"" + *it;
+		if ((*it)[it->size() - 1] != '.')
+			v4a += ".";
+		v4a += "\",\"type\":1,\"TTL\":";
+
+		string v6a = "\"name\":\"" + *it;
+		if ((*it)[it->size() - 1] != '.')
+			v6a += ".";
+		v6a += "\",\"type\":28,\"TTL\":";
+
+		for (;af == AF_INET || af == AF_UNSPEC;) {
+			if ((idx = json.find(v4a, idx)) == string::npos)
+				break;
+			idx += v4a.size();
+
+			// take first ttl
+			if (ttl == 0)
+				ttl = strtoul(json.c_str() + idx, nullptr, 10);
+			if ((idx = json.find("\"data\":\"", idx)) == string::npos)
+				break;
+			idx += 8;
+			if ((idx2 = json.find("\"", idx)) == string::npos)
+				break;
+			tmp = json.substr(idx, idx2 - idx);
+			idx = idx2;
+			if (inet_pton(AF_INET, tmp.c_str(), data) == 1) {
+				//printf(">>>> AF_INET -> %s\n", tmp.c_str());
+				result[string(data, 4)] = "A";
+				has_answer = 1;
+			}
+		}
+
+		idx = aidx;
+
+		for (;af == AF_INET6 || af == AF_UNSPEC;) {
+			if ((idx = json.find(v6a, idx)) == string::npos)
+				break;
+			idx += v6a.size();
+
+			// take first ttl
+			if (ttl == 0)
+				ttl = strtoul(json.c_str() + idx, nullptr, 10);
+			if ((idx = json.find("\"data\":\"", idx)) == string::npos)
+				break;
+			idx += 8;
+			if ((idx2 = json.find("\"", idx)) == string::npos)
+				break;
+			tmp = json.substr(idx, idx2 - idx);
+			idx = idx2;
+			if (inet_pton(AF_INET6, tmp.c_str(), data) == 1) {
+				//printf(">>>> AF_INET6 -> %s\n", tmp.c_str());
+				result[string(data, 16)] = "AAAA";
+				has_answer = 1;
+			}
+		}
+
 	}
 
 	if (ttl > 60*60)
 		ttl = 60*60;
 
-	return 0;
+	return has_answer ? 1 : 0;
 }
 
 }
