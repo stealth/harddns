@@ -107,6 +107,7 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 			req += "&type=ANY";
 
 		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.3\r\nConnection: Keep-Alive\r\n";
+		req += "Accept: application/dns-json\r\n";
 
 		if (req.size() < 450)
 			req += "X-Igno: " + string(450 - req.size(), 'X');
