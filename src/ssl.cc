@@ -67,10 +67,10 @@ static int tcp_connect(const char *host, uint16_t port = 443)
 			return -1;
 	} else if (inet_pton(AF_INET6, host, &sin6.sin6_addr) == 1) {
 		if ((sock = socket(PF_INET6, SOCK_STREAM, 0)) < 0)
+			return -1;
 #ifdef TCP_FASTOPEN_CONNECT
 		setsockopt(sock, IPPROTO_TCP, TCP_FASTOPEN_CONNECT, &one, sizeof(one));
 #endif
-			return -1;
 		sin6.sin6_family = AF_INET6;
 		sin6.sin6_port = htons(port);
 		if (connect(sock, reinterpret_cast<sockaddr *>(&sin6), sizeof(sin6)) < 0)
