@@ -1,7 +1,7 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016-2018 by Sebastian Krahmer,
+ * (C) 2016-2019 by Sebastian Krahmer,
  *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
@@ -18,6 +18,7 @@
  * along with harddns. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <map>
 #include <string>
 #include <cstdlib>
 #include <cstring>
@@ -26,7 +27,8 @@
 #include <time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <map>
+#include <sys/types.h>
+#include <sys/socket.h>
 #include "ssl.h"
 #include "config.h"
 
@@ -48,7 +50,7 @@ ssl_box *ssl_conn = nullptr;
 
 static int tcp_connect(const char *host, uint16_t port = 443)
 {
-	int sock = -1;
+	int sock = -1, one = 1;
 	struct sockaddr_in sin;
 	struct sockaddr_in6 sin6;
 
@@ -56,12 +58,18 @@ static int tcp_connect(const char *host, uint16_t port = 443)
 	if (inet_pton(AF_INET, host, &sin.sin_addr) == 1) {
 		if ((sock = socket(PF_INET, SOCK_STREAM, 0)) < 0)
 			return -1;
+#ifdef TCP_FASTOPEN_CONNECT
+		setsockopt(sock, IPPROTO_TCP, TCP_FASTOPEN_CONNECT, &one, sizeof(one));
+#endif
 		sin.sin_family = AF_INET;
 		sin.sin_port = htons(port);
 		if (connect(sock, reinterpret_cast<sockaddr *>(&sin), sizeof(sin)) < 0)
 			return -1;
 	} else if (inet_pton(AF_INET6, host, &sin6.sin6_addr) == 1) {
 		if ((sock = socket(PF_INET6, SOCK_STREAM, 0)) < 0)
+#ifdef TCP_FASTOPEN_CONNECT
+		setsockopt(sock, IPPROTO_TCP, TCP_FASTOPEN_CONNECT, &one, sizeof(one));
+#endif
 			return -1;
 		sin6.sin6_family = AF_INET6;
 		sin6.sin6_port = htons(port);
@@ -97,14 +105,17 @@ int ssl_box::setup_ctx()
 	const SSL_METHOD *method = nullptr;
 
 	if ((method = SSLv23_client_method()) == nullptr)
-		return build_error("TLSv12_client_method", -1);
+		return build_error("SSLv23_client_method", -1);
 
 	if ((ssl_ctx = SSL_CTX_new(method)) == nullptr)
 		return build_error("SSL_CTX_new", -1);
 
 
 	long op = SSL_OP_ALL|SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1;
-	op |= (SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET);
+
+	// This is a DNS lookup after all, so we can relax some of the options which we
+	// would sue otherwise to tighten security
+	//op |= (SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET);
 
 	if ((unsigned long)(SSL_CTX_set_options(ssl_ctx, op) & op) != (unsigned long)op)
 		return build_error("SSL_CTX_set_options:", -1);

@@ -14,7 +14,24 @@ harddns $ make
 [...]
 ```
 
-to create the `libnss_harddns.so` NSS module
+to create the `libnss_harddns.so` NSS module. Since usability of DoH benefits
+a lot from low latency, you should consider using TLS 1.3 along with TCP Fast Open
+for a quicker TLS handshake. *harddns* already enables TCP Fast Open by itself
+as long as you have Linux kernel >= 4.11 and enabled it in /proc:
+
+```
+harddns $ cat /proc/sys/net/ipv4/tcp_fastopen
+1
+harddns $
+```
+
+where `1` means that it is enabled on client side, which is the default.
+The `Makefile` is alredy set up to be used with custom *OpenSSL* installs,
+as most vendors most likely do not ship *OpenSSL 1.1.1* yet, which is the
+minimum version required to use TLS 1.3.
+*harddns* may be used without all that fine tuning, however you could cut
+latency in half if you do.
+
 
 Install
 -------
@@ -24,7 +41,8 @@ comes with quite some public DoH servers pre-configured.
 
 As root, do:
 ```
-harddns # ./install.pl
+harddns # make install
+./install.pl
 [*] Installing config to /etc/harddns/harddns.conf
 [*] Installing lib to /lib/x86_64-linux-gnu/libnss_harddns.so
 
@@ -62,17 +80,33 @@ hosts:          files harddns mdns_minimal [NOTFOUND=return] dns
 [...]
 ```
 
-That tells your _glibc_ to use _harddns_ before _mdns_ and _dns_. If you want to kick out
-resolve by UDP completely, remove the _mdns_ and _dns_ specification.
+That tells your *glibc* to use *harddns* before *mdns* and *dns*. If you want to kick out
+resolve by UDP completely, remove the *mdns* and *dns* specification.
 
-Start _nscd_ again, if it has been running before, and you are done. All __gethostbyname()__,
-__getaddrinfo()__ etc. calls will now be handled by harddns. You can also watch it
+Start *nscd* again, if it has been running before, and you are done. All `gethostbyname()`,
+`getaddrinfo()` etc. calls will now be handled by *harddns*. You can also watch it
 in action by viewing the system log files, if `log_requests` has been specified.
+
+AppArmor/SELinux
+----------------
+
+If your system is using confinement/MAC, make sure you add apropriate rules
+for the confined programs to allow reading of `/etc/harddns/harddns.conf`.
+
+For example, `/etc/apparmor.d/usr.sbin.nscd` should contain a line like
+
+```
+/etc/harddns/harddns.conf r,
+
+```
+
+in your *AppArmor* config.
 
 Notes
 -----
 
-Hardy Mc Hardns is using the official [DNS-over-HTTPS API provided by Google](https://developers.google.com/speed/public-dns/docs/dns-over-https), *Cloudlflare* and *Quad9*.
+Hardy Mc Hardns is using the official [DNS-over-HTTPS API provided by Google](https://developers.google.com/speed/public-dns/docs/dns-over-https), *Cloudlflare* and *Quad9* servers. The *Cloudflare* DNS servers are listed in the config first,
+because they use TLS 1.3 and TCP Fast Open and have good latency.
 
 The content of the pinned certificate can be viewed via
 

@@ -4,7 +4,7 @@
 sub install_cfg
 {
 	my $tgt_cfg = "/etc/harddns/harddns.conf";
-	my $src_cfg = "sample/harddns.conf";
+	my $src_cfg = "config/harddns.conf";
 
 	print "[*] Installing config to ${tgt_cfg}\n";
 
@@ -26,6 +26,7 @@ sub install_lib
 	}
 
 	$tgt_lib .= $src_lib;
+	$src_lib = "src/build/${src_lib}";
 
 	print "[*] Installing lib to ${tgt_lib}\n";
 
@@ -47,6 +48,10 @@ harddns to your /etc/nsswitch.conf file in the 'hosts' line.
 [...]
 hosts:          files harddns [NOTFOUND=return] dns [...]
 [...]
+
+
+If you are using AppArmor or SELinux, you need to adjust your
+profiles/policies. Then restart nscd to take effect.
 
 EOM
 }
