@@ -25,6 +25,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <string>
+#include <memory>
 #include <cstring>
 
 extern "C" {
@@ -36,6 +37,8 @@ extern "C" {
 
 
 namespace harddns {
+
+template<typename T> using free_ptr = std::unique_ptr<T, void (*)(T *)>;
 
 class ssl_box {
 

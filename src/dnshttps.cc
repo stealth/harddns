@@ -62,7 +62,7 @@ static bool valid_name(const string &name)
 }
 
 // https://developers.google.com/speed/public-dns/docs/dns-over-https
-// https://developers.cloudflare.com/1.1.1.1/dns-over-https
+// https://developers.cloudflare.com/1.1.1.1/dns-over-https/
 // https://www.quad9.net/doh-quad9-dns-servers
 
 int dnshttps::get(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw)
@@ -106,7 +106,7 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 		else
 			req += "&type=ANY";
 
-		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.51\r\nConnection: Keep-Alive\r\n";
+		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.52\r\nConnection: Keep-Alive\r\n";
 		req += "Accept: application/dns-json\r\n";
 
 		if (req.size() < 450)

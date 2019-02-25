@@ -63,8 +63,10 @@ static int tcp_connect(const char *host, uint16_t port = 443)
 #endif
 		sin.sin_family = AF_INET;
 		sin.sin_port = htons(port);
-		if (connect(sock, reinterpret_cast<sockaddr *>(&sin), sizeof(sin)) < 0)
+		if (connect(sock, reinterpret_cast<sockaddr *>(&sin), sizeof(sin)) < 0) {
+			close(sock);
 			return -1;
+		}
 	} else if (inet_pton(AF_INET6, host, &sin6.sin6_addr) == 1) {
 		if ((sock = socket(PF_INET6, SOCK_STREAM, 0)) < 0)
 			return -1;
@@ -73,8 +75,10 @@ static int tcp_connect(const char *host, uint16_t port = 443)
 #endif
 		sin6.sin6_family = AF_INET6;
 		sin6.sin6_port = htons(port);
-		if (connect(sock, reinterpret_cast<sockaddr *>(&sin6), sizeof(sin6)) < 0)
+		if (connect(sock, reinterpret_cast<sockaddr *>(&sin6), sizeof(sin6)) < 0) {
+			close(sock);
 			return -1;
+		}
 	} else
 		return -1;
 
@@ -178,16 +182,13 @@ static int post_connection_check(X509 *x509, const string &peer)
 
 int ssl_box::connect_ssl(const string &host)
 {
-	ns_ip = host;
 
-	::close(sock);
-	if (ssl)
-		SSL_free(ssl);
+	this->close();
+
+	ns_ip = host;
 
 	if ((sock = tcp_connect(host.c_str())) < 0)
 		return build_error("tcp_connect", -1);
-
-	X509 *x509 = nullptr;
 
 	if ((ssl = SSL_new(ssl_ctx)) == nullptr)
 		return -1;
@@ -202,19 +203,15 @@ int ssl_box::connect_ssl(const string &host)
 	if ((err = SSL_get_verify_result(ssl)) != X509_V_OK)
 		return build_error(X509_verify_cert_error_string(err), -1);
 
-	if ((x509 = SSL_get_peer_certificate(ssl)) == nullptr)
+	free_ptr<X509> x509(SSL_get_peer_certificate(ssl), X509_free);
+	if (x509.get() == nullptr)
 		return build_error("SSL_get_peer_certificate", -1);
 
-	if (post_connection_check(x509, ns_ip) != 1)
+	if (post_connection_check(x509.get(), ns_ip) != 1)
 		return build_error("SSL Post connection check failed. CN mismatch?", -1);
 
-	EVP_PKEY *peer_key = nullptr;
-	if (pinned.size() > 0)
-		peer_key = X509_get_pubkey(x509);
-
-	X509_free(x509);
-
 	if (pinned.size() > 0) {
+		EVP_PKEY *peer_key = X509_get_pubkey(x509.get());
 
 		if (!peer_key)
 			return build_error("No key inside peer X509?!", -1);
@@ -240,8 +237,11 @@ void ssl_box::close()
 	if (ssl)
 		SSL_free(ssl);
 	ssl = nullptr;
-	::close(sock);
+
+	if (sock > -1)
+		::close(sock);
 	sock = -1;
+
 	ns_ip = "";
 }
 
