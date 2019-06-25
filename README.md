@@ -45,10 +45,12 @@ harddns # make install
 ./install.pl
 [*] Installing config to /etc/harddns/harddns.conf
 [*] Installing lib to /lib/x86_64-linux-gnu/libnss_harddns.so
+```
 
-Success so far. To enable DoH resolving system-wide, add
-harddns to your /etc/nsswitch.conf file in the 'hosts' line.
+Success so far. To enable DoH resolving system-wide, stop *nscd*
+and add harddns to your `/etc/nsswitch.conf` file in the 'hosts' line.
 
+```
 [...]
 hosts:          files harddns [NOTFOUND=return] dns [...]
 [...]
@@ -60,7 +62,7 @@ you should remove them. *harddns* is now using the CA bundle of your system.
 
 Only place PEM files inside the `pinned` subdir if you know what you are doing.
 
-If you need to:
+If you really need pinned certifcates:
 ```
 $ openssl s_client -showcerts -connect 1.1.1.1:443
 ```
@@ -70,18 +72,6 @@ will give you the required certificates.
 You may put any number of pinned certificates to the `pinned` subdir. The filename
 has to end with `.pem`. At least one of the certificates inside this directory has to match
 during the TLS connect, otherwise the resolve will fail.
-
-Once the config and nss module is in place, stop _nscd_ if it is running, and add the
-*harddns* module to your `/etc/nsswitch.conf` file, so it looks like this or similar:
-
-```
-[...]
-hosts:          files harddns mdns_minimal [NOTFOUND=return] dns
-[...]
-```
-
-That tells your *glibc* to use *harddns* before *mdns* and *dns*. If you want to kick out
-resolve by UDP completely, remove the *mdns* and *dns* specification.
 
 Start *nscd* again, if it has been running before, and you are done. All `gethostbyname()`,
 `getaddrinfo()` etc. calls will now be handled by *harddns*. You can also watch it
