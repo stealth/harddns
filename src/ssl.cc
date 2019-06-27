@@ -30,6 +30,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include "ssl.h"
+#include "misc.h"
 #include "config.h"
 
 extern "C" {
@@ -93,14 +94,14 @@ ssl_box::ssl_box()
 
 ssl_box::~ssl_box()
 {
-	for (auto p : pinned) {
+	for (auto p : d_pinned) {
 		EVP_PKEY_free(p);
 	}
-	if (ssl)
-		SSL_free(ssl);
-	if (ssl_ctx)
-		SSL_CTX_free(ssl_ctx);
-	::close(sock);
+	if (d_ssl)
+		SSL_free(d_ssl);
+	if (d_ssl_ctx)
+		SSL_CTX_free(d_ssl_ctx);
+	::close(d_sock);
 }
 
 
@@ -111,7 +112,7 @@ int ssl_box::setup_ctx()
 	if ((method = SSLv23_client_method()) == nullptr)
 		return build_error("SSLv23_client_method", -1);
 
-	if ((ssl_ctx = SSL_CTX_new(method)) == nullptr)
+	if ((d_ssl_ctx = SSL_CTX_new(method)) == nullptr)
 		return build_error("SSL_CTX_new", -1);
 
 
@@ -121,25 +122,25 @@ int ssl_box::setup_ctx()
 	// would sue otherwise to tighten security
 	//op |= (SSL_OP_SINGLE_DH_USE|SSL_OP_SINGLE_ECDH_USE|SSL_OP_NO_TICKET);
 
-	if ((unsigned long)(SSL_CTX_set_options(ssl_ctx, op) & op) != (unsigned long)op)
+	if ((unsigned long)(SSL_CTX_set_options(d_ssl_ctx, op) & op) != (unsigned long)op)
 		return build_error("SSL_CTX_set_options:", -1);
 
-	if (SSL_CTX_load_verify_locations(ssl_ctx, NULL, "/etc/ssl/certs") != 1)
+	if (SSL_CTX_load_verify_locations(d_ssl_ctx, NULL, "/etc/ssl/certs") != 1)
 		return build_error("SSL_CTX_load_verify_locations:", -1);
 
-	if (SSL_CTX_set_default_verify_paths(ssl_ctx) != 1)
+	if (SSL_CTX_set_default_verify_paths(d_ssl_ctx) != 1)
 		return build_error("SSL_CTX_set_default_verify_paths: %s\n", -1);
 
-	SSL_CTX_set_verify(ssl_ctx,
+	SSL_CTX_set_verify(d_ssl_ctx,
 	                       SSL_VERIFY_PEER|
  	                       SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
 	                       nullptr);
-	SSL_CTX_set_verify_depth(ssl_ctx, 100);
+	SSL_CTX_set_verify_depth(d_ssl_ctx, 100);
 
-	SSL_CTX_set_mode(ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
+	SSL_CTX_set_mode(d_ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
 
 #ifdef CIPHER_LIST
-	if (SSL_CTX_set_cipher_list(ssl_ctx, CIPHER_LIST) != 1)
+	if (SSL_CTX_set_cipher_list(d_ssl_ctx, CIPHER_LIST) != 1)
 		return build_error("SSL_CTX_set_cipher_list:", -1);
 #endif
 
@@ -185,39 +186,39 @@ int ssl_box::connect_ssl(const string &host)
 
 	this->close();
 
-	ns_ip = host;
+	d_ns_ip = host;
 
-	if ((sock = tcp_connect(host.c_str())) < 0)
+	if ((d_sock = tcp_connect(host.c_str())) < 0)
 		return build_error("tcp_connect", -1);
 
-	if ((ssl = SSL_new(ssl_ctx)) == nullptr)
+	if ((d_ssl = SSL_new(d_ssl_ctx)) == nullptr)
 		return -1;
-	SSL_set_fd(ssl, sock);
-	if (SSL_connect(ssl) <= 0)
+	SSL_set_fd(d_ssl, d_sock);
+	if (SSL_connect(d_ssl) <= 0)
 		return build_error("SSL_connect:", -1);
 
 	// only set non blocking after SSL_connect()
-	fcntl(sock, F_SETFL, O_RDWR|O_NONBLOCK);
+	fcntl(d_sock, F_SETFL, O_RDWR|O_NONBLOCK);
 
 	int err = 0;
-	if ((err = SSL_get_verify_result(ssl)) != X509_V_OK)
+	if ((err = SSL_get_verify_result(d_ssl)) != X509_V_OK)
 		return build_error(X509_verify_cert_error_string(err), -1);
 
-	free_ptr<X509> x509(SSL_get_peer_certificate(ssl), X509_free);
+	free_ptr<X509> x509(SSL_get_peer_certificate(d_ssl), X509_free);
 	if (x509.get() == nullptr)
 		return build_error("SSL_get_peer_certificate", -1);
 
-	if (post_connection_check(x509.get(), ns_ip) != 1)
+	if (post_connection_check(x509.get(), d_ns_ip) != 1)
 		return build_error("SSL Post connection check failed. CN mismatch?", -1);
 
-	if (pinned.size() > 0) {
+	if (d_pinned.size() > 0) {
 		EVP_PKEY *peer_key = X509_get_pubkey(x509.get());
 
 		if (!peer_key)
 			return build_error("No key inside peer X509?!", -1);
 
 		bool has = 0;
-		for (auto p : pinned) {
+		for (auto p : d_pinned) {
 			if (EVP_PKEY_cmp(p, peer_key) == 1)
 				has = 1;
 		}
@@ -234,21 +235,21 @@ int ssl_box::connect_ssl(const string &host)
 
 void ssl_box::close()
 {
-	if (ssl)
-		SSL_free(ssl);
-	ssl = nullptr;
+	if (d_ssl)
+		SSL_free(d_ssl);
+	d_ssl = nullptr;
 
-	if (sock > -1)
-		::close(sock);
-	sock = -1;
+	if (d_sock > -1)
+		::close(d_sock);
+	d_sock = -1;
 
-	ns_ip = "";
+	d_ns_ip = "";
 }
 
 
 ssize_t ssl_box::send(const string &buf, long to)
 {
-	if (!ssl)
+	if (!d_ssl)
 		return -1;
 
 	int r = 0, written = 0;
@@ -256,9 +257,9 @@ ssize_t ssl_box::send(const string &buf, long to)
 	timespec ts = {0, 10000000};	// 10ms
 
 	for (;waiting < to;) {
-		r = SSL_write(ssl, buf.c_str() + written, buf.size() - written);
+		r = SSL_write(d_ssl, buf.c_str() + written, buf.size() - written);
 
-		switch (SSL_get_error(ssl, r)) {
+		switch (SSL_get_error(d_ssl, r)) {
 		case SSL_ERROR_NONE:
 			break;
 		case SSL_ERROR_WANT_WRITE:
@@ -287,7 +288,7 @@ ssize_t ssl_box::send(const string &buf, long to)
 
 ssize_t ssl_box::recv(string &s, long to)
 {
-	if (!ssl)
+	if (!d_ssl)
 		return -1;
 
 	int r = 0;
@@ -298,8 +299,8 @@ ssize_t ssl_box::recv(string &s, long to)
 	s = "";
 
 	for (;waiting < to;) {
-		r = SSL_read(ssl, buf, sizeof(buf) - 1);
-		switch (SSL_get_error(ssl, r)) {
+		r = SSL_read(d_ssl, buf, sizeof(buf) - 1);
+		switch (SSL_get_error(d_ssl, r)) {
 		case SSL_ERROR_NONE:
 			break;
 		case SSL_ERROR_WANT_WRITE:

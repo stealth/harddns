@@ -66,9 +66,7 @@ static int load_certificates()
 }
 
 
-
-extern "C" void harddns_init() __attribute__((constructor));
-extern "C" void harddns_init()
+void harddns_init()
 {
 
 	harddns::config::parse_config("/etc/harddns");
@@ -92,8 +90,7 @@ extern "C" void harddns_init()
 }
 
 
-extern "C" void harddns_init() __attribute__((destructor));
-extern "C" void harddns_fini()
+void harddns_fini()
 {
 	delete harddns::ssl_conn;
 	delete harddns::dns;

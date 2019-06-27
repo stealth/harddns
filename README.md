@@ -45,17 +45,21 @@ harddns # make install
 ./install.pl
 [*] Installing config to /etc/harddns/harddns.conf
 [*] Installing lib to /lib/x86_64-linux-gnu/libnss_harddns.so
-```
 
-Success so far. To enable DoH resolving system-wide, stop *nscd*
-and add harddns to your `/etc/nsswitch.conf` file in the 'hosts' line.
+Success so far. To enable DoH resolving system-wide, add
+harddns to your /etc/nsswitch.conf file in the 'hosts' line.
 
-```
 [...]
 hosts:          files harddns [NOTFOUND=return] dns [...]
 [...]
-harddns #
+
+
+If you are using AppArmor or SELinux, you need to adjust your
+profiles/policies. Then restart nscd to take effect.
+
 ```
+
+And follow the instructions for the `nsswitch.conf` modification.
 
 If you have any (legacy) pinned certificates inside `/etc/harddns/pinned`,
 you should remove them. *harddns* is now using the CA bundle of your system.
@@ -73,7 +77,7 @@ You may put any number of pinned certificates to the `pinned` subdir. The filena
 has to end with `.pem`. At least one of the certificates inside this directory has to match
 during the TLS connect, otherwise the resolve will fail.
 
-Start *nscd* again, if it has been running before, and you are done. All `gethostbyname()`,
+Restart *nscd*, if it was running, and you are done. All `gethostbyname()`,
 `getaddrinfo()` etc. calls will now be handled by *harddns*. You can also watch it
 in action by viewing the system log files, if `log_requests` has been specified.
 

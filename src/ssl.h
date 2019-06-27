@@ -38,33 +38,32 @@ extern "C" {
 
 namespace harddns {
 
-template<typename T> using free_ptr = std::unique_ptr<T, void (*)(T *)>;
 
 class ssl_box {
 
 private:
-	int sock{-1};
+	int d_sock{-1};
 
-	std::vector<EVP_PKEY *> pinned;
-	SSL_CTX *ssl_ctx{nullptr};
-	SSL *ssl{nullptr};
+	std::vector<EVP_PKEY *> d_pinned;
+	SSL_CTX *d_ssl_ctx{nullptr};
+	SSL *d_ssl{nullptr};
 
-	std::string err{""}, ns_ip{""};
+	std::string d_err{""}, d_ns_ip{""};
 
 	template<class T>
 	T build_error(const std::string &msg, T r)
 	{
 		int e = 0;
-		err = "ssl_box::";
-		err += msg;
+		d_err = "ssl_box::";
+		d_err += msg;
 		if ((e = ERR_get_error())) {
 			ERR_load_crypto_strings();
-			err += ":";
-			err += ERR_error_string(e, nullptr);
+			d_err += ":";
+			d_err += ERR_error_string(e, nullptr);
 			ERR_clear_error();
 		} else if (errno) {
-			err += ":";
-			err += strerror(errno);
+			d_err += ":";
+			d_err += strerror(errno);
 		}
 		return r;
 	}
@@ -78,12 +77,12 @@ public:
 
 	const char *why()
 	{
-		return err.c_str();
+		return d_err.c_str();
 	}
 
 	void add_pinned(EVP_PKEY *evp)
 	{
-		pinned.push_back(evp);
+		d_pinned.push_back(evp);
 	}
 
 	int setup_ctx();
@@ -99,7 +98,7 @@ public:
 
 	std::string peer()
 	{
-		return ns_ip;
+		return d_ns_ip;
 	}
 };
 

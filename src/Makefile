@@ -16,15 +16,18 @@ DEFS+=-DTCP_FASTOPEN_CONNECT=30
 
 .PHONY: all clean distclean
 
-all: build build/libnss_harddns.so
+all: build build/harddns build/libnss_harddns.so
 
 build:
 	mkdir build || true
 
-build/libnss_harddns.so: build/nss.o build/ssl.o build/init.o build/config.o build/dnshttps.o
+build/libnss_harddns.so: build/nss.o build/ssl.o build/nss-init.o build/init.o build/config.o build/dnshttps.o
 	$(CXX) -pie -shared -Wl,-soname,libnss_harddns.so $^ -o $@ $(LIBS)
 
-build/test: build/nss.o build/ssl.o build/init.o build/config.o build/dnshttps.o
+build/harddns: build/ssl.o build/init.o build/config.o build/dnshttps.o build/proxy.o build/misc.o build/main.o
+	$(CXX) -pie $^ -o $@ $(LIBS)
+
+build/test: build/nss.o build/ssl.o build/init.o build/nss-init.o build/config.o build/dnshttps.o
 	$(CXX) -shared -pie $^ -o $@ $(LIBS)
 
 
@@ -42,6 +45,19 @@ build/ssl.o: ssl.cc
 
 build/init.o: init.cc
 	$(CXX) $(DEFS) $(INC) $(CXXFLAGS) $^ -o $@
+
+build/nss-init.o: nss-init.cc
+	$(CXX) $(DEFS) $(INC) $(CXXFLAGS) $^ -o $@
+
+build/proxy.o: proxy.cc
+	$(CXX) $(DEFS) $(INC) $(CXXFLAGS) $^ -o $@
+
+build/misc.o: misc.cc
+	$(CXX) $(DEFS) $(INC) $(CXXFLAGS) $^ -o $@
+
+build/main.o: main.cc
+	$(CXX) $(DEFS) $(INC) $(CXXFLAGS) $^ -o $@
+
 
 clean:
 	rm -f build/*.o
