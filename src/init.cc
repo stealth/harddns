@@ -97,5 +97,7 @@ void harddns_fini()
 
 	delete harddns::config::ns;
 	delete harddns::config::ns_cfg;
+
+	closelog();
 }
 
