@@ -169,6 +169,7 @@ int doh_proxy::loop()
 		if (cache_lookup(fqdn, af, result, ttl))
 			rdata_from_cache = 1;
 		else if ((r = dns->get(fqdn, af, result, ttl, raw)) <= 0) {
+			answer.a_count = 0;
 			if (r < 0)
 				answer.rcode = 2;
 			else

@@ -45,21 +45,30 @@ harddns # make install
 ./install.pl
 [*] Installing config to /etc/harddns/harddns.conf
 [*] Installing lib to /lib/x86_64-linux-gnu/libnss_harddns.so
+[*] Installing proxy daemon to /usr/local/bin/harddnsd
 
 Success so far. To enable DoH resolving system-wide, add
-harddns to your /etc/nsswitch.conf file in the 'hosts' line.
+either harddns to your /etc/nsswitch.conf file in the 'hosts' line:
 
 [...]
 hosts:          files harddns [NOTFOUND=return] dns [...]
 [...]
 
 
-If you are using AppArmor or SELinux, you need to adjust your
-profiles/policies. Then restart nscd to take effect.
+If you are using AppArmor or SELinux, you need to review/adjust your
+profiles/policies (check README). Then restart nscd to take effect.
+
+
+If you do not want or cannot use the NSS approach, you may ignore
+above hints. Then you may just start /usr/local/bin/harddnsd
+and change your resolver config to point to "127.0.0.1".
+Then change your system startup scripts to start harddnsd automatically
+at boot.
 
 ```
 
-And follow the instructions for the `nsswitch.conf` modification.
+And follow the instructions for the `nsswitch.conf` modification or
+the proxy-daemon startup at your choice.
 
 If you have any (legacy) pinned certificates inside `/etc/harddns/pinned`,
 you should remove them. *harddns* is now using the CA bundle of your system.
