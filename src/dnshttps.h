@@ -53,6 +53,9 @@ class dnshttps {
 		return r;
 	}
 
+
+	int parse_rfc8484(const std::string &, int, std::map<std::string, std::string> &, uint32_t &, std::string &, const std::string &, std::string::size_type, size_t);
+
 	int parse_json(const std::string &, int, std::map<std::string, std::string> &, uint32_t &, std::string &, const std::string &, std::string::size_type, size_t);
 
 public:

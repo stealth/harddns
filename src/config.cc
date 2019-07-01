@@ -71,10 +71,12 @@ int parse_config(const string &cfgbase)
 
 		if (sline.find("log_requests") == 0)
 			config::log_requests = 1;
-		else if (sline.find("nameserver=") == 0) {
+		else if (sline.find("rfc8484") == 0) {
+			config::ns_cfg->find(ns)->second.rfc8484 = 1;
+		} else if (sline.find("nameserver=") == 0) {
 			ns = sline.substr(11);
 			config::ns->push_back(ns);
-			config::ns_cfg->insert(make_pair(ns, a_ns_cfg{ns, "no-cn", "no-host", "no-get"}));
+			config::ns_cfg->insert(make_pair(ns, a_ns_cfg{ns, "no-cn", "no-host", "no-get", 0}));
 		} else if (sline.find("cn=") == 0) {
 			config::ns_cfg->find(ns)->second.cn = sline.substr(3);
 		} else if (sline.find("host=") == 0) {

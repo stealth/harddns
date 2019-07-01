@@ -20,6 +20,7 @@
 #ifndef harddns_misc_h
 #define harddns_misc_h
 
+#include <memory>
 #include <string>
 
 namespace harddns {

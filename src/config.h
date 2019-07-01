@@ -36,6 +36,7 @@ extern bool log_requests;
 
 struct a_ns_cfg {
 	std::string ip, cn, host, get;
+	bool rfc8484;
 };
 
 extern std::map<std::string, struct a_ns_cfg> *ns_cfg;

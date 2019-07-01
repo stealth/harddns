@@ -82,7 +82,7 @@ int host2qname(const string &host, string &result)
 }
 
 
-/*  "\003foo\003bar\000" -> foo.bar
+/*  "\003foo\003bar\000" -> foo.bar.
  */
 int qname2host(const string &msg, string &result)
 {

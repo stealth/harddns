@@ -25,14 +25,19 @@
 #include <map>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/time.h>
 #include <syslog.h>
+#include "misc.h"
 #include "dnshttps.h"
+#include "net-headers.h"
+#include "base64.h"
 #include "config.h"
 
 
 namespace harddns {
 
 using namespace std;
+using namespace net_headers;
 
 
 dnshttps *dns = nullptr;
@@ -61,9 +66,41 @@ static bool valid_name(const string &name)
 	return 1;
 }
 
+
+// construct a DNS query for rfc8484
+string make_query(const string &name, int af)
+{
+	timeval tv = {0, 0};
+	gettimeofday(&tv, nullptr);
+
+	string dns_query = "", qname = "", b64query = "";
+
+	uint16_t qclass = htons(1), qtype = (af == AF_INET ? htons(dns_type::A) : htons(dns_type::AAAA));
+
+	dnshdr qhdr;
+	qhdr.q_count = htons(1);
+	qhdr.qr = 0;
+	qhdr.rd = 1;
+	qhdr.id = tv.tv_usec % 0xffff;
+
+	host2qname(name, qname);
+	if (!qname.size())
+		return b64query;
+
+	dns_query = string(reinterpret_cast<char *>(&qhdr), sizeof(qhdr));
+	dns_query += qname;
+	dns_query += string(reinterpret_cast<char *>(&qtype), sizeof(uint16_t));
+	dns_query += string(reinterpret_cast<char *>(&qclass), sizeof(uint16_t));
+
+	b64url_encode(dns_query, b64query);
+	return b64query;
+}
+
+
 // https://developers.google.com/speed/public-dns/docs/dns-over-https
 // https://developers.cloudflare.com/1.1.1.1/dns-over-https/
 // https://www.quad9.net/doh-quad9-dns-servers
+// https://tools.ietf.org/html/rfc8484
 
 int dnshttps::get(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw)
 {
@@ -97,17 +134,31 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 
 		//printf(">>>> %s %s %s %s\n", cfg->second.ip.c_str(), cfg->second.get.c_str(), cfg->second.host.c_str(), cfg->second.cn.c_str());
 
-		string req = "GET " + get + name, reply = "", tmp = "";
-//		req += "&edns_client_subnet=0.0.0.0/0";
-		if (af == AF_INET)
-			req += "&type=A";
-		else if (af == AF_INET6)
-			req += "&type=AAAA";
-		else
-			req += "&type=ANY";
+		string req = "GET " + get, reply = "", tmp = "";
+
+		if (cfg->second.rfc8484) {
+			string b64 = make_query(name, af);
+			if (!b64.size())
+				return build_error("Failed to create rfc8484 request.", -1);
+			req += b64;
+		} else {
+			req += name;
+
+			if (af == AF_INET)
+				req += "&type=A";
+			else if (af == AF_INET6)
+				req += "&type=AAAA";
+			else
+				req += "&type=ANY";
+		}
 
 		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.53\r\nConnection: Keep-Alive\r\n";
-		req += "Accept: application/dns-json\r\n";
+
+		if (cfg->second.rfc8484)
+			req += "Accept: application/dns-message\r\n";
+		else
+			req += "Accept: application/dns-json\r\n";
+
 
 		if (req.size() < 450)
 			req += "X-Igno: " + string(450 - req.size(), 'X');
@@ -180,13 +231,186 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 		if (!has_answer)
 			ssl->close();
 		else {
-			return parse_json(name, af, result, ttl, raw, reply, content_idx, cl);
+			if (cfg->second.rfc8484)
+				return parse_rfc8484(name, af, result, ttl, raw, reply, content_idx, cl);
+			else
+				return parse_json(name, af, result, ttl, raw, reply, content_idx, cl);
 		}
 	}
 
 	return 0;
 }
 
+
+int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw, const string &reply, string::size_type content_idx, size_t cl)
+{
+	string dns_reply = "", tmp = "";
+	string::size_type idx = string::npos, aidx = string::npos;
+	bool has_answer = 0;
+
+	if (cl > 0 && content_idx != string::npos) {
+		dns_reply = reply.substr(content_idx);
+		if (dns_reply.size() < cl)
+			return build_error("Incomplete read from rfc8484 server.", -1);
+	} else {
+		// parse chunked encoding
+		idx = reply.find("\r\n\r\n");
+		if (idx == string::npos || idx + 4 >= reply.size())
+			return build_error("Invalid reply.", -1);
+		idx += 4;
+		for (;;) {
+			string::size_type nl = reply.find("\r\n", idx);
+			if (nl == string::npos || nl + 2 > reply.size())
+				return build_error("Invalid reply.", -1);
+			cl = strtoul(reply.c_str() + idx, nullptr, 16);
+
+			// end of chunk?
+			if (cl == 0)
+				break;
+
+			if (cl > 65535 || nl + 2 + cl > reply.size())
+				return build_error("Invalid reply.", -1);
+			idx = nl + 2;
+			dns_reply += reply.substr(idx, cl);
+			idx += cl + 2;
+		}
+	}
+
+	raw = dns_reply;
+
+	if (dns_reply.size() < sizeof(dnshdr) + 5)
+		return build_error("Invalid reply.", -1);
+
+	const dnshdr *dhdr = reinterpret_cast<const dnshdr *>(dns_reply.c_str());
+
+	if (dhdr->qr != 1)
+		return build_error("Invalid DNS header. Not a reply.", -1);
+
+	if (dhdr->rcode != 0)
+		return build_error("DNS error response from server.", -1);
+
+	string fqdn = "";
+	idx = sizeof(dnshdr);
+	int qnlen = qname2host(dns_reply.substr(idx), fqdn);
+	if (!fqdn.size() || idx + qnlen + 2*sizeof(uint16_t) >= dns_reply.size())
+		return build_error("Invalid reply.", -1);
+	idx += qnlen + 2*sizeof(uint16_t);
+	aidx = idx;
+
+	uint16_t rdlen = 0, qtype = 0, qclass = 0;
+
+	// first of all, find all CNAMEs
+	vector<string> fqdns{name};
+
+	for (int i = 0;; ++i) {
+		if (idx >= dns_reply.size())
+			break;
+
+		// compressed label?
+		unsigned char cmp = 0;
+		if ((dns_reply[idx] & 0xc0) > 0) {
+			if (idx + 1 >= dns_reply.size())
+				return build_error("Invalid reply.", -1);
+			cmp = (dns_reply[idx + 1] & 0xff);
+			if (cmp >= dns_reply.size())
+				return build_error("Invalid reply.", -1);
+
+			qname2host(dns_reply.substr(cmp), fqdn);
+			qnlen = 2;
+		} else
+			qnlen = qname2host(dns_reply.substr(idx), fqdn);
+
+		// 10 -> qtype,class,ttl,rdlen
+		if (!fqdn.size() || idx + qnlen + 10 >= dns_reply.size())
+			return build_error("Invalid reply.", -1);
+		idx += qnlen;
+		qtype = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
+		idx += sizeof(uint16_t);
+		qclass = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
+		idx += sizeof(uint16_t);
+		ttl = ntohl(*reinterpret_cast<const uint32_t *>(dns_reply.c_str() + idx));
+		idx += sizeof(uint32_t);
+		rdlen = ntohs(*reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx));
+		idx += sizeof(uint16_t);
+
+		if (idx + rdlen > dns_reply.size() || qclass != htons(1) || rdlen == 0)
+			return build_error("Invalid reply.", -1);
+
+		if (qtype == htons(dns_type::CNAME)) {
+			// compressed label?
+			if ((dns_reply[idx] & 0xc0) > 0) {
+				if (idx + 1 >= dns_reply.size())
+					return build_error("Invalid reply.", -1);
+				cmp = (dns_reply[idx + 1] & 0xff);
+				if (cmp >= dns_reply.size())
+					return build_error("Invalid reply.", -1);
+				qname2host(dns_reply.substr(cmp), fqdn);
+				rdlen = 2;
+			} else
+				qname2host(dns_reply.substr(idx), fqdn);
+			if (!fqdn.size())
+				return build_error("Invalid reply.", -1);
+			fqdns.push_back(fqdn);
+		}
+
+		idx += rdlen;
+	}
+
+
+	idx = aidx;
+	for (int i = 0;; ++i) {
+		if (idx >= dns_reply.size())
+			break;
+
+		// compressed label?
+		unsigned char cmp = 0;
+		if ((dns_reply[idx] & 0xc0) > 0) {
+			if (idx + 1 >= dns_reply.size())
+				return build_error("Invalid reply.", -1);
+			cmp = (dns_reply[idx + 1] & 0xff);
+			if (cmp >= dns_reply.size())
+				return build_error("Invalid reply.", -1);
+
+			qname2host(dns_reply.substr(cmp), fqdn);
+			qnlen = 2;
+		} else
+			qnlen = qname2host(dns_reply.substr(idx), fqdn);
+
+		// 10 -> qtype,class,ttl,rdlen
+		if (!fqdn.size() || idx + qnlen + 10 >= dns_reply.size())
+			return build_error("Invalid reply.", -1);
+		idx += qnlen;
+		qtype = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
+		idx += sizeof(uint16_t);
+		qclass = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
+		idx += sizeof(uint16_t);
+		ttl = ntohl(*reinterpret_cast<const uint32_t *>(dns_reply.c_str() + idx));
+		idx += sizeof(uint32_t);
+		rdlen = ntohs(*reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx));
+		idx += sizeof(uint16_t);
+
+		if (idx + rdlen > dns_reply.size() || qclass != htons(1) || rdlen == 0)
+			return build_error("Invalid reply.", -1);
+
+		if (qtype == htons(dns_type::A)) {
+			if (rdlen != 4)
+				return build_error("Invalid reply.", -1);
+			result[dns_reply.substr(idx, 4)] = "A";
+			if (af == AF_INET || af == AF_UNSPEC)
+				has_answer = 1;
+		} else if (qtype == htons(dns_type::AAAA)) {
+			if (rdlen != 16)
+				return build_error("Invalid reply.", -1);
+			result[dns_reply.substr(idx, 16)] = "AAAA";
+			if (af == AF_INET6 || af == AF_UNSPEC)
+				has_answer = 1;
+		}
+
+		idx += rdlen;
+	}
+
+	return has_answer ? 1 : 0;
+}
 
 
 int dnshttps::parse_json(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw, const string &reply, string::size_type content_idx, size_t cl)
@@ -199,7 +423,7 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 	if (cl > 0 && content_idx != string::npos) {
 		json = reply.substr(content_idx);
 		if (json.size() < cl)
-			return build_error("Incomplete read from server.", -1);
+			return build_error("Incomplete read from json server.", -1);
 	} else {
 		// parse chunked encoding
 		idx = reply.find("\r\n\r\n");

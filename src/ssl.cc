@@ -148,7 +148,7 @@ int ssl_box::setup_ctx()
 }
 
 
-static int post_connection_check(X509 *x509, const string &peer)
+static int post_connection_check(X509 *x509, const string &peer, string &cn)
 {
 	X509_NAME *subj = X509_get_subject_name(x509);
 	if (!subj)
@@ -175,6 +175,7 @@ static int post_connection_check(X509 *x509, const string &peer)
 		if (cfg != config::ns_cfg->end()) {
 			if (s == cfg->second.cn)
 				return 1;
+			cn = s;
 		}
 	}
 	return 0;
@@ -208,8 +209,9 @@ int ssl_box::connect_ssl(const string &host)
 	if (x509.get() == nullptr)
 		return build_error("SSL_get_peer_certificate", -1);
 
-	if (post_connection_check(x509.get(), d_ns_ip) != 1)
-		return build_error("SSL Post connection check failed. CN mismatch?", -1);
+	string cn = "";
+	if (post_connection_check(x509.get(), d_ns_ip, cn) != 1)
+		return build_error("SSL Post connection check failed. CN mismatch:" + cn, -1);
 
 	if (d_pinned.size() > 0) {
 		EVP_PKEY *peer_key = X509_get_pubkey(x509.get());
