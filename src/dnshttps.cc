@@ -149,7 +149,7 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 			else if (af == AF_INET6)
 				req += "&type=AAAA";
 			else
-				req += "&type=ANY";
+				req += "&type=A";
 		}
 
 		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.53\r\nConnection: Keep-Alive\r\n";

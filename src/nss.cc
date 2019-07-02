@@ -103,6 +103,8 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 		string s = name;
 		for (i = 0; s.size() > 0 && i < 5; ++i) {
 			r = dns->get(s, af, res, ttl, raw);
+			if (config::log_requests)
+				syslog(LOG_INFO, "%s %s? -> %s", name, af == AF_INET ? "A" : "AAAA", raw.c_str());
 			if (r < 0) {
 				syslog(LOG_INFO, "%s", dns->why());
 				return NSS_STATUS_TRYAGAIN;
@@ -117,9 +119,6 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 			}
 		}
 	}
-
-	if (config::log_requests)
-		syslog(LOG_INFO, "%s %d? -> %s", name, af, raw.c_str());
 
 	naddr = 0;
 	for (auto it = res.begin(); it != res.end(); ++it) {
@@ -261,13 +260,19 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 		// up to 5 levels of DNS CNAME recursion
 		string s = name;
 		for (int i = 0; s.size() > 0 && i < 5; ++i) {
+
 			r = dns->get(s, AF_INET, res, ttl, raw);
+			if (config::log_requests)
+				syslog(LOG_INFO, "%s A? -> %s", name, raw.c_str());
 			if (r < 0) {
 				syslog(LOG_INFO, "%s", dns->why());
 				return NSS_STATUS_TRYAGAIN;
 			} else if (r == 1)
 				naddr = 1;
+
 			r = dns->get(s, AF_INET6, res, ttl, raw);
+			if (config::log_requests)
+				syslog(LOG_INFO, "%s AAAA? -> %s", name, raw.c_str());
 			if (r < 0) {
 				syslog(LOG_INFO, "%s", dns->why());
 				return NSS_STATUS_TRYAGAIN;
@@ -291,9 +296,6 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 	}
 	if (naddr == 0)
 		return NSS_STATUS_NOTFOUND;
-
-	if (config::log_requests)
-		syslog(LOG_INFO, "%s ANY? -> %s", name, raw.c_str());
 
 
 	/* Found and have data */
