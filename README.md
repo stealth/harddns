@@ -1,8 +1,25 @@
-harddns nss module
-==================
+D'oH! harddns
+=============
 
-aka Hardy Mc Hardns NSS module for using public DoH (DNS over HTTPS) in your system
-resolving (for Linux).
+![harddns](https://github.com/stealth/harddns/blob/master/logo.jpg)
+
+[![paypal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=9MVF8BRMX2CWA)
+
+*harddns* was one of the first DoH implementations for Linux
+at a time when only one big search company offered a public
+`dns-json` API endpoint in 2016 and there have not been any RFCs
+about it. It began as a Name Service Switch (NSS) module.
+Since then it has evolved and currently features:
+
+* NSS module for Linux
+* standalone proxy daemon
+* RFC8484 and RFC8427 support
+* caching of successful resolves
+* small footprint and least privilege design
+
+As always, if you like the project, please give it a github star. Github stars are
+valuable for developers' CV's and reputation in open source communities.
+
 
 Build
 -----
@@ -14,7 +31,7 @@ harddns $ make
 [...]
 ```
 
-to create the `libnss_harddns.so` NSS module. Since usability of DoH benefits
+to create the `libnss_harddns.so` NSS module and proxy. Since usability of DoH benefits
 a lot from low latency, you should consider using TLS 1.3 along with TCP Fast Open
 for a quicker TLS handshake. *harddns* already enables TCP Fast Open by itself
 as long as you have Linux kernel >= 4.11 and enabled it in /proc:
@@ -72,6 +89,8 @@ the proxy-daemon startup at your choice.
 
 If you have any (legacy) pinned certificates inside `/etc/harddns/pinned`,
 you should remove them. *harddns* is now using the CA bundle of your system.
+It's strongly discouraged to use pinned certificates, as DoH endpoint certificates
+change often.
 
 Only place PEM files inside the `pinned` subdir if you know what you are doing.
 
@@ -89,6 +108,28 @@ during the TLS connect, otherwise the resolve will fail.
 Restart *nscd*, if it was running, and you are done. All `gethostbyname()`,
 `getaddrinfo()` etc. calls will now be handled by *harddns*. You can also watch it
 in action by viewing the system log files, if `log_requests` has been specified.
+
+
+If your OS does not support NSS, just start
+
+```
+harddns # /usr/local/bin/harddnsd
+
+harddns -- DoH proxy server v0.53 (C) 2019 Sebastian Krahmer https://github.com/stealth/harddns
+
+
+Starting up DoH proxy at 127.0.0.1:53 change with [-l addr] [-p port]
+switching to user 'nobody' (change with [-u user])
+
+harddns #
+```
+
+and set `127.0.0.1` in your `/etc/resolv.conf` or `scutil` config (OSX).
+You have to create your own startup scripts if you want to start *harddnsd* at boot.
+
+Make sure that your firewalling rules allow DNS traffic on loopback and outgoing https
+traffic to the dedicated DoH servers.
+
 
 AppArmor/SELinux
 ----------------
@@ -108,7 +149,7 @@ in your *AppArmor* config.
 Notes
 -----
 
-Hardy Mc Hardns is using the official [DNS-over-HTTPS API provided by Google](https://developers.google.com/speed/public-dns/docs/dns-over-https), *Cloudlflare* and *Quad9* servers. The *Cloudflare* DNS servers are listed in the config first,
+Harddns is using the official [DNS-over-HTTPS API provided by Google](https://developers.google.com/speed/public-dns/docs/dns-over-https), *Cloudlflare* and *Quad9* servers. The *Cloudflare* DNS servers are listed in the config first,
 because they use TLS 1.3 and TCP Fast Open and have good latency.
 
 The content of the pinned certificate can be viewed via

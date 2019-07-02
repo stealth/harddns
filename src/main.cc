@@ -60,6 +60,8 @@ void close_fds()
 
 int main(int argc, char **argv)
 {
+	string banner = "\nharddns -- DoH proxy server v0.53 (C) 2019 Sebastian Krahmer https://github.com/stealth/harddns\n\n\n";
+
 	char c = 0;
 	string laddr = "127.0.0.1", lport = "53", root = "/", user = "nobody";
 
@@ -90,6 +92,9 @@ int main(int argc, char **argv)
 	}
 	uid_t user_uid = pw->pw_uid;
 	gid_t user_gid = pw->pw_gid;
+
+	cout<<banner<<"Starting up DoH proxy at "<<laddr<<":"<<lport<<" (change with [-l addr] [-p port])\n"
+	    <<"switching to user '"<<user<<"' (change with [-u user])\n\n";
 
 	if (fork() > 0)
 		return 0;
@@ -136,6 +141,7 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
+	syslog(LOG_INFO, "harddnsd going into proxy loop.");
 	if (doh.loop() < 0)
 		syslog(LOG_INFO, "%s", doh.why());
 
