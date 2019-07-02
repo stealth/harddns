@@ -501,9 +501,9 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 				break;
 			idx += v4a.size();
 
-			// take first ttl
-			if (ttl == 0)
-				ttl = strtoul(json.c_str() + idx, nullptr, 10);
+			uint32_t cttl = strtoul(json.c_str() + idx, nullptr, 10);
+			if (ttl > cttl)
+				ttl = cttl;
 			if ((idx = json.find("\"data\":\"", idx)) == string::npos)
 				break;
 			idx += 8;
@@ -525,9 +525,9 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 				break;
 			idx += v6a.size();
 
-			// take first ttl
-			if (ttl == 0)
-				ttl = strtoul(json.c_str() + idx, nullptr, 10);
+			uint32_t cttl = strtoul(json.c_str() + idx, nullptr, 10);
+			if (ttl > cttl)
+				ttl = cttl;
 			if ((idx = json.find("\"data\":\"", idx)) == string::npos)
 				break;
 			idx += 8;
