@@ -168,7 +168,7 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 		//printf(">>>> %s\n", req.c_str());
 
 		// maybe closed due to error or not initialized in the first place
-		if (ssl->send(req) < 0) {
+		if (ssl->send(req) <= 0) {
 			if (ssl->connect_ssl(ns) < 0) {
 				ssl->close();
 				syslog(LOG_INFO, "No SSL connection to %s (%s)", ns.c_str(), ssl->why());
@@ -187,7 +187,7 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 		bool has_answer = 0;
 
 		for (int j = 0; j < maxtries; ++j) {
-			if (ssl->recv(tmp) < 0) {
+			if (ssl->recv(tmp) <= 0) {
 				ssl->close();
 				syslog(LOG_INFO, "Error when receiving reply from %s (%s)", ns.c_str(), ssl->why());
 				break;
@@ -289,46 +289,44 @@ int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &res
 	if (dhdr->rcode != 0)
 		return build_error("DNS error response from server.", -1);
 
-	string fqdn = "";
+	string aname = "", cname = "", fqdn = "";
 	idx = sizeof(dnshdr);
-	int qnlen = qname2host(dns_reply.substr(idx), fqdn);
-	if (!fqdn.size() || idx + qnlen + 2*sizeof(uint16_t) >= dns_reply.size())
+	int qnlen = qname2host(dns_reply, fqdn, idx);
+	if (qnlen <= 0 || idx + qnlen + 2*sizeof(uint16_t) >= dns_reply.size())
 		return build_error("Invalid reply.", -1);
+	if (string(name + ".") != fqdn)
+		return build_error("Wrong name in awnser.", -1);
+
 	idx += qnlen + 2*sizeof(uint16_t);
 	aidx = idx;
 
-	uint16_t rdlen = 0, qtype = 0, qclass = 0;
+	ttl = 60*60;
 
-	// first of all, find all CNAMEs
-	vector<string> fqdns{name};
+	uint16_t rdlen = 0, qtype = 0, qclass = 0;
+	uint32_t cttl = 0;
+
+	// first of all, find all CNAMEs for desired name
+	map<string, int> fqdns{{fqdn, 1}};
 
 	for (int i = 0;; ++i) {
 		if (idx >= dns_reply.size())
 			break;
 
-		// compressed label?
-		unsigned char cmp = 0;
-		if ((dns_reply[idx] & 0xc0) > 0) {
-			if (idx + 1 >= dns_reply.size())
-				return build_error("Invalid reply.", -1);
-			cmp = (dns_reply[idx + 1] & 0xff);
-			if (cmp >= dns_reply.size())
-				return build_error("Invalid reply.", -1);
+		// also handles compressed labels
+		if ((qnlen = qname2host(dns_reply, aname, idx)) <= 0)
+			return build_error("Invalid reply.", -1);;
 
-			qname2host(dns_reply.substr(cmp), fqdn);
-			qnlen = 2;
-		} else
-			qnlen = qname2host(dns_reply.substr(idx), fqdn);
-
-		// 10 -> qtype,class,ttl,rdlen
-		if (!fqdn.size() || idx + qnlen + 10 >= dns_reply.size())
+		// 10 -> qtype, qclass, ttl, rdlen
+		if (idx + qnlen + 10 >= dns_reply.size())
 			return build_error("Invalid reply.", -1);
 		idx += qnlen;
 		qtype = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint16_t);
 		qclass = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint16_t);
-		ttl = ntohl(*reinterpret_cast<const uint32_t *>(dns_reply.c_str() + idx));
+		cttl = ntohl(*reinterpret_cast<const uint32_t *>(dns_reply.c_str() + idx));
+		if (ttl > cttl)
+			ttl = cttl;
 		idx += sizeof(uint32_t);
 		rdlen = ntohs(*reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx));
 		idx += sizeof(uint16_t);
@@ -337,68 +335,49 @@ int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &res
 			return build_error("Invalid reply.", -1);
 
 		if (qtype == htons(dns_type::CNAME)) {
-			// compressed label?
-			if ((dns_reply[idx] & 0xc0) > 0) {
-				if (idx + 1 >= dns_reply.size())
-					return build_error("Invalid reply.", -1);
-				cmp = (dns_reply[idx + 1] & 0xff);
-				if (cmp >= dns_reply.size())
-					return build_error("Invalid reply.", -1);
-				qname2host(dns_reply.substr(cmp), fqdn);
-				rdlen = 2;
-			} else
-				qname2host(dns_reply.substr(idx), fqdn);
-			if (!fqdn.size())
-				return build_error("Invalid reply.", -1);
-			fqdns.push_back(fqdn);
+			if (qname2host(dns_reply, cname, idx) <= 0)
+				return build_error("Invalid reply.", -1);;
+
+			if (fqdns.count(aname) > 0)
+				fqdns[cname] = 1;
 		}
 
 		idx += rdlen;
 	}
-
 
 	idx = aidx;
 	for (int i = 0;; ++i) {
 		if (idx >= dns_reply.size())
 			break;
 
-		// compressed label?
-		unsigned char cmp = 0;
-		if ((dns_reply[idx] & 0xc0) > 0) {
-			if (idx + 1 >= dns_reply.size())
-				return build_error("Invalid reply.", -1);
-			cmp = (dns_reply[idx + 1] & 0xff);
-			if (cmp >= dns_reply.size())
-				return build_error("Invalid reply.", -1);
+		if ((qnlen = qname2host(dns_reply, aname, idx)) <= 0)
+			return build_error("Invalid reply.", -1);
 
-			qname2host(dns_reply.substr(cmp), fqdn);
-			qnlen = 2;
-		} else
-			qnlen = qname2host(dns_reply.substr(idx), fqdn);
-
-		// 10 -> qtype,class,ttl,rdlen
-		if (!fqdn.size() || idx + qnlen + 10 >= dns_reply.size())
+		// 10 -> qtype, qclass, ttl, rdlen
+		if (idx + qnlen + 10 >= dns_reply.size())
 			return build_error("Invalid reply.", -1);
 		idx += qnlen;
 		qtype = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint16_t);
 		qclass = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint16_t);
-		ttl = ntohl(*reinterpret_cast<const uint32_t *>(dns_reply.c_str() + idx));
+
+		// TTL. was already calculated last loop
 		idx += sizeof(uint32_t);
+
 		rdlen = ntohs(*reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx));
 		idx += sizeof(uint16_t);
 
 		if (idx + rdlen > dns_reply.size() || qclass != htons(1) || rdlen == 0)
 			return build_error("Invalid reply.", -1);
 
-		if (qtype == htons(dns_type::A)) {
+		if (qtype == htons(dns_type::A) && fqdns.count(aname) > 0) {
 			if (rdlen != 4)
 				return build_error("Invalid reply.", -1);
 			result[dns_reply.substr(idx, 4)] = "A";
 			if (af == AF_INET || af == AF_UNSPEC)
 				has_answer = 1;
-		} else if (qtype == htons(dns_type::AAAA)) {
+		} else if (qtype == htons(dns_type::AAAA) && fqdns.count(aname) > 0) {
 			if (rdlen != 16)
 				return build_error("Invalid reply.", -1);
 			result[dns_reply.substr(idx, 16)] = "AAAA";
@@ -463,6 +442,8 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 	idx += 10;
 	aidx = idx;
 
+	ttl = 60*60;
+
 	// first of all, find all CNAMEs
 	vector<string> fqdns{name};
 	string s = name;
@@ -476,9 +457,10 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 			break;
 		idx += cname.size();
 
-		// take first ttl
-		if (ttl == 0)
-			ttl = strtoul(json.c_str() + idx, nullptr, 10);
+		// take minimum ttl
+		uint32_t cttl = strtoul(json.c_str() + idx, nullptr, 10);
+		if (ttl > cttl)
+			ttl = cttl;
 		if ((idx = json.find("\"data\":\"", idx)) == string::npos)
 			break;
 		idx += 8;
@@ -561,9 +543,6 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 		}
 
 	}
-
-	if (ttl > 60*60)
-		ttl = 60*60;
 
 	return has_answer ? 1 : 0;
 }

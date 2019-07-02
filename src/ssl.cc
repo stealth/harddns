@@ -27,6 +27,7 @@
 #include <time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include "ssl.h"
@@ -295,34 +296,36 @@ ssize_t ssl_box::recv(string &s, long to)
 
 	int r = 0;
 	char buf[4096] = {0};
-	long waiting = 0;
-	timespec ts = {0, 10000000};	// 10ms
+	timeval tv = {0, to/1000};	// ns to us
+
+	fd_set rset;
+	FD_ZERO(&rset);
+	FD_SET(d_sock, &rset);
+
+	if ((r = select(d_sock + 1, &rset, nullptr, nullptr, &tv)) <= 0) {
+		if (r < 0)
+			return build_error("SSL_read::select:", -1);
+		return 0;
+	}
 
 	s = "";
 
-	for (;waiting < to;) {
-		r = SSL_read(d_ssl, buf, sizeof(buf) - 1);
-		switch (SSL_get_error(d_ssl, r)) {
-		case SSL_ERROR_NONE:
-			break;
-		case SSL_ERROR_WANT_WRITE:
-		case SSL_ERROR_WANT_READ:
-			r = 0;
-			break;
-		case SSL_ERROR_ZERO_RETURN:
-			return build_error("SSL_read: Peer closed connection.", -1);
-		default:
-			return build_error("SSL_read:", -1);
-		}
-
-		if (r == 0) {
-			nanosleep(&ts, nullptr);
-			waiting += ts.tv_nsec;
-		} else if (r > 0) {
-			s = string(buf, r);
-			break;
-		}
+	r = SSL_read(d_ssl, buf, sizeof(buf) - 1);
+	switch (SSL_get_error(d_ssl, r)) {
+	case SSL_ERROR_NONE:
+		break;
+	case SSL_ERROR_WANT_WRITE:
+	case SSL_ERROR_WANT_READ:
+		r = 0;
+		break;
+	case SSL_ERROR_ZERO_RETURN:
+		return build_error("SSL_read: Peer closed connection.", -1);
+	default:
+		return build_error("SSL_read:", -1);
 	}
+
+	if (r > 0)
+		s = string(buf, r);
 
 	return r;
 }

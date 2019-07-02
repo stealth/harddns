@@ -84,10 +84,10 @@ int host2qname(const string &host, string &result)
 
 /*  "\003foo\003bar\000" -> foo.bar.
  */
-int qname2host(const string &msg, string &result)
+int qname2host(const string &msg, string &result, string::size_type start_idx)
 {
-	string::size_type i = 0;
-	uint8_t len = 0;
+	string::size_type i = start_idx, r = 0;
+	uint8_t len = 0, compress_depth = 0;
 
 	result = "";
 	string s = "";
@@ -98,16 +98,42 @@ int qname2host(const string &msg, string &result)
 	}
 
 	while ((len = msg[i]) != 0) {
-		if (len > dns_max_label)
-			return -1;
+		if (len > dns_max_label) {
+			// start_idx of 0 means we just have a qname string, not an entire DNS packet,
+			// so we cant uncompress compressed labels
+			if (start_idx == 0 || ++compress_depth > 10)
+				return -1;
+			// compressed?
+			if (len & 0xc0) {
+				if (i + 1 >= msg.size())
+					return -1;
+				i = msg[i + 1] & 0xff;
+				if (i >= msg.size())
+					return -1;
+				// actually += 2, but the return will add 1
+				// only for the first compression
+				if (compress_depth <= 1)
+					r += 1;
+				continue;
+			} else
+				return -1;
+		}
 		if (len + i + 1 > msg.size())
 			return -1;
 		s += msg.substr(i + 1, len);
 		s += ".";
+
 		i += len + 1;
+
+		if (compress_depth == 0)
+			r += len + 1;
 	}
+
 	result = s;
-	return i + 1;
+	if (result.size() == 0)
+		return 0;
+
+	return r + 1;
 }
 
 
