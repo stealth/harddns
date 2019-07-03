@@ -143,7 +143,24 @@ switching to user 'nobody' (change with [-u user])
 harddns #
 ```
 
-and set `127.0.0.1` in your `/etc/resolv.conf` or `scutil` config (OSX).
+and add `127.0.0.1` in your `/etc/resolv.conf` or `scutil` config (OSX):
+
+```
+harddns # cat /etc/resolv.conf
+
+nameserver 127.0.0.1
+nameserver the.other.one
+
+```
+
+Note that *harddnsd* is marked as first DNS resolver, but you still
+keep the one that you used before, as *harddnsd* proxy is currently just
+resolving A and AAAA records. Some programs, such as *FreeBSD*'s
+`pkg` however make strange requests to find update servers, which
+*harddnsd* can't handle. So the second entry is the fallback for
+these cases. Support for non-A/AAAA requests may be added later.
+
+
 You have to create your own startup scripts if you want to start *harddnsd* at boot.
 
 Make sure that your firewalling rules allow DNS traffic on loopback and outgoing https
