@@ -276,7 +276,9 @@ int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &res
 		}
 	}
 
-	raw = dns_reply;
+	// For rfc8484, do not pass around the raw (binary) message, which would potentially
+	// be used for logging. Unused by now.
+	raw = "";
 
 	if (dns_reply.size() < sizeof(dnshdr) + 5)
 		return build_error("Invalid reply.", -1);

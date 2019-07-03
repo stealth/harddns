@@ -108,7 +108,7 @@ int qname2host(const string &msg, string &result, string::size_type start_idx)
 				if (i + 1 >= msg.size())
 					return -1;
 				i = msg[i + 1] & 0xff;
-				if (i >= msg.size())
+				if (i < 0 || i >= msg.size())
 					return -1;
 				// actually += 2, but the return will add 1
 				// only for the first compression

@@ -20,14 +20,15 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <syslog.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
-#include "net-headers.h"
-#include "proxy.h"
 #include "misc.h"
-
+#include "proxy.h"
+#include "config.h"
+#include "net-headers.h"
 
 namespace harddns {
 
@@ -180,6 +181,9 @@ int doh_proxy::loop()
 			sendto(d_sock, reply.c_str(), reply.size(), 0, from, flen);
 			continue;
 		}
+
+		if (raw.size() && config::log_requests)
+			syslog(LOG_INFO, "proxy %s %s? -> %s", fqdn.c_str(), af == AF_INET ? "A" : "AAAA", raw.c_str());
 
 		// We found an answer
 		answer.rcode = 0;
