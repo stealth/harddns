@@ -129,8 +129,12 @@ int ssl_box::setup_ctx()
 	if (SSL_CTX_load_verify_locations(d_ssl_ctx, NULL, "/etc/ssl/certs") != 1)
 		return build_error("SSL_CTX_load_verify_locations:", -1);
 
+	if (SSL_CTX_load_verify_locations(d_ssl_ctx, NULL, "/etc/openssl/certs") != 1)
+		return build_error("SSL_CTX_load_verify_locations:", -1);
+
+
 	if (SSL_CTX_set_default_verify_paths(d_ssl_ctx) != 1)
-		return build_error("SSL_CTX_set_default_verify_paths: %s\n", -1);
+		return build_error("SSL_CTX_set_default_verify_dirs: %s\n", -1);
 
 	SSL_CTX_set_verify(d_ssl_ctx,
 	                       SSL_VERIFY_PEER|
@@ -191,13 +195,13 @@ int ssl_box::connect_ssl(const string &host)
 	d_ns_ip = host;
 
 	if ((d_sock = tcp_connect(host.c_str())) < 0)
-		return build_error("tcp_connect", -1);
+		return build_error("connect_ssl::tcp_connect", -1);
 
 	if ((d_ssl = SSL_new(d_ssl_ctx)) == nullptr)
 		return -1;
 	SSL_set_fd(d_ssl, d_sock);
 	if (SSL_connect(d_ssl) <= 0)
-		return build_error("SSL_connect:", -1);
+		return build_error("connect_ssl::SSL_connect:", -1);
 
 	// only set non blocking after SSL_connect()
 	fcntl(d_sock, F_SETFL, O_RDWR|O_NONBLOCK);
@@ -208,17 +212,17 @@ int ssl_box::connect_ssl(const string &host)
 
 	free_ptr<X509> x509(SSL_get_peer_certificate(d_ssl), X509_free);
 	if (x509.get() == nullptr)
-		return build_error("SSL_get_peer_certificate", -1);
+		return build_error("connect_ssl::SSL_get_peer_certificate:", -1);
 
 	string cn = "";
 	if (post_connection_check(x509.get(), d_ns_ip, cn) != 1)
-		return build_error("SSL Post connection check failed. CN mismatch:" + cn, -1);
+		return build_error("connect_ssl::SSL Post connection check failed. CN mismatch:" + cn, -1);
 
 	if (d_pinned.size() > 0) {
 		EVP_PKEY *peer_key = X509_get_pubkey(x509.get());
 
 		if (!peer_key)
-			return build_error("No key inside peer X509?!", -1);
+			return build_error("connect_ssl::No key inside peer X509?!", -1);
 
 		bool has = 0;
 		for (auto p : d_pinned) {
@@ -229,7 +233,7 @@ int ssl_box::connect_ssl(const string &host)
 		EVP_PKEY_free(peer_key);
 
 		if (has != 1)
-			return build_error("Peer X509 not in pinned list!", -1);
+			return build_error("connect_ssl::Peer X509 not in pinned list!", -1);
 	}
 
 	return 0;
@@ -270,9 +274,9 @@ ssize_t ssl_box::send(const string &buf, long to)
 			r = 0;
 			break;
 		case SSL_ERROR_ZERO_RETURN:
-			return build_error("SSL_write: Peer closed connection.", -1);
+			return build_error("send::SSL_write: Peer closed connection.", -1);
 		default:
-			return build_error("SSL_write:", -1);
+			return build_error("send::SSL_write:", -1);
 		}
 
 		if (r == 0) {
@@ -296,7 +300,8 @@ ssize_t ssl_box::recv(string &s, long to)
 
 	int r = 0;
 	char buf[4096] = {0};
-	timeval tv = {0, to/1000};	// ns to us
+	long us = to/1000;
+	timeval tv = {(time_t)us/1000000, (suseconds_t)us%1000000};
 
 	fd_set rset;
 	FD_ZERO(&rset);
@@ -304,7 +309,7 @@ ssize_t ssl_box::recv(string &s, long to)
 
 	if ((r = select(d_sock + 1, &rset, nullptr, nullptr, &tv)) <= 0) {
 		if (r < 0)
-			return build_error("SSL_read::select:", -1);
+			return build_error("recv::select:", -1);
 		return 0;
 	}
 
@@ -319,9 +324,9 @@ ssize_t ssl_box::recv(string &s, long to)
 		r = 0;
 		break;
 	case SSL_ERROR_ZERO_RETURN:
-		return build_error("SSL_read: Peer closed connection.", -1);
+		return build_error("recv::SSL_read: Peer closed connection.", -1);
 	default:
-		return build_error("SSL_read:", -1);
+		return build_error("recv::SSL_read:", -1);
 	}
 
 	if (r > 0)

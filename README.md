@@ -12,17 +12,23 @@ about it. It began as a Name Service Switch (NSS) module.
 Since then it has evolved and currently features:
 
 * NSS module for Linux
-* standalone proxy daemon
+* non-NSS, standalone proxy daemon, if desired
 * RFC8484 and RFC8427 support
 * caching of successful resolves
+* TCP Fast Open when OS supports it
+* TLS 1.3 ready to benefit from faster handshakes
 * small footprint and least privilege design
+* batteries included: comes with a config that works with all major DoH providers
 
 As always, if you like the project, please give it a github star. Github stars are
 valuable for developers' CV's and reputation in open source communities.
 
 
 Build
------
+=====
+
+Linux
+------
 
 The build requires openssl libraries to be installed. Then just
 
@@ -48,6 +54,19 @@ as most vendors most likely do not ship *OpenSSL 1.1.1* yet, which is the
 minimum version required to use TLS 1.3.
 *harddns* may be used without all that fine tuning, however you could cut
 latency in half if you do.
+
+
+BSD
+---
+
+On BSD systems you need `gmake` (gnu-make) installed.
+
+```
+harddns $ gmake -C src
+[...]
+```
+
+This will give you the *harddnsd* daemon for installation.
 
 
 Install
@@ -129,6 +148,15 @@ You have to create your own startup scripts if you want to start *harddnsd* at b
 
 Make sure that your firewalling rules allow DNS traffic on loopback and outgoing https
 traffic to the dedicated DoH servers.
+
+On some BSD systems, such as *NetBSD*, you need to install the openssl
+root CA's by hand, before *harddnsd* can be started:
+
+```
+bsd # pkgin install mozilla-rootcerts
+[...]
+bsd # mozilla-rootcerts install
+```
 
 
 AppArmor/SELinux

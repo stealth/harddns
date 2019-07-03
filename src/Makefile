@@ -16,7 +16,16 @@ DEFS+=-DTCP_FASTOPEN_CONNECT=30
 
 .PHONY: all clean distclean
 
+ifeq ($(shell uname), Linux)
+
 all: build build/harddnsd build/libnss_harddns.so
+
+else
+
+all: build build/harddnsd
+
+endif
+
 
 build:
 	mkdir build || true
