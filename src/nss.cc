@@ -31,6 +31,8 @@
 #include <signal.h>
 #include <map>
 #include <mutex>
+#include <sys/types.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include "dnshttps.h"
 #include "config.h"
