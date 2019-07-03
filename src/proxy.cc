@@ -49,7 +49,7 @@ int doh_proxy::init(const string &laddr, const string &lport)
 
 	if ((d_sock = socket(ai->ai_family, SOCK_DGRAM, 0)) < 0)
 		return build_error("init::socket:", -1);
-	if (bind(d_sock, ai->ai_addr, ai->ai_addrlen) < 0)
+	if (::bind(d_sock, ai->ai_addr, ai->ai_addrlen) < 0)
 		return build_error("init::bind:", -1);
 
 	// No need to create a dnshttp object, it was globally created
