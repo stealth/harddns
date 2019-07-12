@@ -18,6 +18,8 @@
  */
 
 #include <string>
+#include <cstring>
+
 
 namespace harddns {
 
@@ -26,6 +28,7 @@ using namespace std;
 const uint8_t dns_max_label = 63;
 
 /* "foo.bar" -> "\003foo\003bar\000"
+ * "foo.bar." -> "\003foo\003bar\000"
  * automatically splits labels larger than 63 byte into
  * sub-domains
  */
@@ -33,6 +36,8 @@ int host2qname(const string &host, string &result)
 {
 	string split_host = "";
 	string::size_type pos1 = 0, pos2 = 0;
+
+	result = "";
 
 	for (;pos1 < host.size();) {
 		pos2 = host.find(".", pos1);
@@ -52,33 +57,33 @@ int host2qname(const string &host, string &result)
 		split_host += ".";
 	}
 
-	try {
-		result.clear();
-		result.reserve(split_host.length() + 2);
-		result.resize(split_host.length() + 2);
-	} catch (...) {
+	if (split_host.size() >= 2048)
 		return -1;
-	}
 
-	int i = 0, j = 0, k = 0, l = 0;
-	uint8_t how_much = 0;
+	char buf[4096] = {0};
+	memcpy(buf + 1, split_host.c_str(), split_host.size());
 
-	while (i < (int)split_host.length()) {
-		l = i;
-		how_much = 0;
-		while (split_host[i] != '.' && i != (int)split_host.length()) {
-			++how_much;
+	// now, substitute dots by cnt
+	string::size_type last_dot = 0;
+	for (; last_dot < split_host.size();) {
+		uint8_t i = 0;
+		while (buf[last_dot + i] != '.' && buf[last_dot + i] != 0)
 			++i;
+		buf[last_dot] = i - 1;
+		last_dot += i;
+
+		// end of string without trailing "." ?
+		if (buf[last_dot] == 0)
+			break;
+		// end with trailing "." ?
+		if (buf[last_dot + 1] == 0) {
+			buf[last_dot] = 0;
+			break;
 		}
-		result[j] = how_much;
-		++j;
-		i = l;
-		for (k = 0; k < how_much; j++, i++, k++)
-			result[j] = split_host[i];
-		++i;
 	}
-	result[j] = '\0';
-	return j + 1;
+
+	result = string(buf, last_dot + 1);
+	return last_dot + 1;
 }
 
 
@@ -132,6 +137,12 @@ int qname2host(const string &msg, string &result, string::size_type start_idx)
 	result = s;
 	if (result.size() == 0)
 		return 0;
+
+	// RFC1035
+	if (result.size() > 255) {
+		result = "";
+		return -1;
+	}
 
 	return r + 1;
 }

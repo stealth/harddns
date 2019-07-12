@@ -13,6 +13,7 @@ Since then it has evolved and currently features:
 
 * NSS module for Linux
 * non-NSS, standalone proxy daemon, if desired
+* Linux, BSD and OSX support
 * RFC8484 and RFC8427 support
 * caching of successful resolves
 * TCP Fast Open when OS supports it
@@ -55,6 +56,17 @@ minimum version required to use TLS 1.3.
 *harddns* may be used without all that fine tuning, however you could cut
 latency in half if you do.
 
+OSX
+---
+
+The build requires the GNU toolchain and openssl libraries installed.
+You then need to change the ssl library path to match your install
+inside `src/Makefile`.
+
+```
+harddns $ make
+[...]
+```
 
 BSD
 ---
@@ -78,7 +90,7 @@ comes with quite some public DoH servers pre-configured.
 As root, do:
 ```
 harddns # make install
-./install.pl
+perl ./install.pl
 [*] Installing config to /etc/harddns/harddns.conf
 [*] Installing lib to /lib/x86_64-linux-gnu/libnss_harddns.so
 [*] Installing proxy daemon to /usr/local/bin/harddnsd
@@ -143,7 +155,11 @@ switching to user 'nobody' (change with [-u user])
 harddns #
 ```
 
-and add `127.0.0.1` in your `/etc/resolv.conf` or `scutil` config (OSX):
+and add `127.0.0.1` in your `/etc/resolv.conf`, or for OSX use:
+
+```
+harddns # networksetup -setdnsservers "Ethernet" 127.0.0.1 the.other.one
+```
 
 ```
 harddns # cat /etc/resolv.conf
@@ -158,7 +174,11 @@ keep the one that you used before, as *harddnsd* proxy is currently just
 resolving A and AAAA records. Some programs, such as *FreeBSD*'s
 `pkg` however make strange requests to find update servers, which
 *harddnsd* can't handle. So the second entry is the fallback for
-these cases. Support for non-A/AAAA requests may be added later.
+these cases. Support for non-A/AAAA requests may be added later. If you run
+`systemd-resolv` or `dnsmasq` on `127.0.0.1:53` you may use `127.0.0.2`
+as binding address for *harddnsd* and use it in `/etc/resolv.conf`
+accordingly, so you do not need to remove your existing configs if you
+just want to test it.
 
 
 You have to create your own startup scripts if you want to start *harddnsd* at boot.

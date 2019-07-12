@@ -37,15 +37,15 @@ class doh_proxy {
 	int d_af{0};
 
 	struct cache_elem_t {
-		std::string rdata;
+		dnshttps::dns_reply answer;
 		time_t valid_until;
 	};
 
-	std::map<std::pair<std::string, int>, cache_elem_t> d_rr_cache;
+	std::map<std::pair<std::string, uint16_t>, cache_elem_t> d_rr_cache;
 
-	void cache_insert(const std::string &, int, const std::string &, uint32_t);
+	void cache_insert(const std::string &, uint16_t, const dnshttps::dns_reply &);
 
-	bool cache_lookup(const std::string &, int, std::map<std::string, std::string> &, uint32_t &);
+	bool cache_lookup(const std::string &, uint16_t, dnshttps::dns_reply &);
 
 	// As the dnshttp object we use the globally exported 'dns'
 	// as used for the NSS module

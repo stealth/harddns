@@ -58,23 +58,31 @@ int doh_proxy::init(const string &laddr, const string &lport)
 }
 
 
-void doh_proxy::cache_insert(const string &fqdn, int af, const string &rdata, uint32_t ttl)
+void doh_proxy::cache_insert(const string &fqdn, uint16_t qtype, const dnshttps::dns_reply &ans)
 {
 	timeval tv;
 	gettimeofday(&tv, nullptr);
 
-	auto idx = d_rr_cache.find(make_pair(fqdn, af));
+	auto idx = d_rr_cache.find(make_pair(fqdn, qtype));
 
 	if (idx != d_rr_cache.end())
 		d_rr_cache.erase(idx);
 
-	cache_elem_t elem{rdata, tv.tv_sec + ttl};
+	uint32_t min_ttl = 0xffffffff;
+	for (auto i = ans.begin(); i != ans.end(); ++i) {
+		if (i->second.name.find("NSS") == 0)
+			continue;
+		if (min_ttl > ntohl(i->second.ttl))
+			min_ttl = ntohl(i->second.ttl);
+	}
 
-	d_rr_cache[make_pair(fqdn, af)] = elem;
+	cache_elem_t elem{ans, tv.tv_sec + min_ttl};
+
+	d_rr_cache[make_pair(fqdn, qtype)] = elem;
 }
 
 
-bool doh_proxy::cache_lookup(const string &fqdn, int af, map<string, string> &result, uint32_t &ttl)
+bool doh_proxy::cache_lookup(const string &fqdn, uint16_t qtype, dnshttps::dns_reply &result)
 {
 	timeval tv;
 	gettimeofday(&tv, nullptr);
@@ -82,22 +90,23 @@ bool doh_proxy::cache_lookup(const string &fqdn, int af, map<string, string> &re
 	if (d_rr_cache.size() == 0)
 		return 0;
 
-	auto idx = d_rr_cache.find(make_pair(fqdn, af));
+	auto idx = d_rr_cache.find(make_pair(fqdn, qtype));
 
 	if (idx == d_rr_cache.end())
 		return 0;
 
-	auto elem = idx->second;
-
-	if (elem.valid_until > tv.tv_sec) {
-		ttl = elem.valid_until - tv.tv_sec;
-		result.insert(make_pair(elem.rdata, af == AF_INET ? "A" : "AAAA"));
-		return 1;
+	if (idx->second.valid_until <= tv.tv_sec) {
+		d_rr_cache.erase(idx);
+		return 0;
 	}
 
-	// timed out
-	d_rr_cache.erase(idx);
-	return 0;
+	auto elem = idx->second.answer;
+
+	for (auto i = elem.begin(); i != elem.end(); ++i)
+		i->second.ttl = htonl(idx->second.valid_until - tv.tv_sec);	// TTL in result map goes as network order
+
+	result = elem;
+	return 1;
 }
 
 
@@ -111,11 +120,9 @@ int doh_proxy::loop()
 	socklen_t flen = sizeof(from4);
 	dnshdr *query = nullptr, answer;
 	string fqdn = "", qname = "", raw = "", reply = "";
-	map<string, string> result;
+	dnshttps::dns_reply result;
 	uint16_t qtype = 0, qclass = 0;
-	uint32_t ttl = 0;
-	int af = 0;
-	uint16_t clbl = htons(((1<<15)|(1<<14))|sizeof(dnshdr));
+	//uint16_t clbl = htons(((1<<15)|(1<<14))|sizeof(dnshdr));
 
 	if (d_af == AF_INET6) {
 		from = reinterpret_cast<sockaddr *>(&from6);
@@ -141,11 +148,13 @@ int doh_proxy::loop()
 		if (query->q_count != htons(1))
 			continue;
 
-		// qnlen may be smaller than qname.size(), as there may be OPT stuff after the question
 		qname = string(buf + sizeof(dnshdr), r - sizeof(dnshdr) - 2*sizeof(uint16_t));
 		int qnlen = qname2host(qname, fqdn);
 		if (qnlen <= 0)
 			continue;
+
+		// It's important here that qname may not contain compression (qname2host() called
+		// with start_idx = 0)
 
 		qtype = *reinterpret_cast<uint16_t *>(buf + sizeof(dnshdr) + qnlen);
 		qclass = *reinterpret_cast<uint16_t *>(buf + sizeof(dnshdr) + qnlen + sizeof(uint16_t));
@@ -154,7 +163,6 @@ int doh_proxy::loop()
 			continue;
 		if (qclass != htons(1))
 			continue;
-		af = (qtype == htons(dns_type::A) ? AF_INET : AF_INET6);
 
 		auto dot = fqdn.rfind(".");
 		if (dot != string::npos)
@@ -168,9 +176,12 @@ int doh_proxy::loop()
 
 		bool rdata_from_cache = 0;
 
-		if (cache_lookup(fqdn, af, result, ttl))
+		raw = "";
+
+		if (cache_lookup(fqdn, qtype, result))
 			rdata_from_cache = 1;
-		else if ((r = dns->get(fqdn, af, result, ttl, raw)) <= 0) {
+		else if ((r = dns->get(fqdn, qtype, result, raw)) <= 0) {
+
 			answer.a_count = 0;
 			if (r < 0)
 				answer.rcode = 2;
@@ -183,8 +194,8 @@ int doh_proxy::loop()
 			continue;
 		}
 
-		if (raw.size() && config::log_requests)
-			syslog(LOG_INFO, "proxy %s %s? -> %s", fqdn.c_str(), af == AF_INET ? "A" : "AAAA", raw.c_str());
+		if (config::log_requests)
+			syslog(LOG_INFO, "proxy %s %s? -> %s", fqdn.c_str(), qtype == htons(dns_type::A) ? "A" : "AAAA", rdata_from_cache ? "(cached)" : raw.c_str());
 
 		// We found an answer
 		answer.rcode = 0;
@@ -193,27 +204,24 @@ int doh_proxy::loop()
 
 		// copy orig question
 		reply = string(buf + sizeof(dnshdr), qnlen + 2*sizeof(uint16_t));
-		ttl = htonl(ttl);
+
+		if (!rdata_from_cache)
+			cache_insert(fqdn, qtype, result);
 
 		uint16_t rdlen = 0, n_answers = 0;
 
 		for (auto i = result.begin(); i != result.end(); ++i) {
 
-			if (af == AF_INET && i->second == "A") {
-				rdlen = htons(4);
-			} else if (af == AF_INET6 && i->second == "AAAA") {
-				rdlen = htons(16);
-			} else
+			// skip the entries that were created for NSS module
+			if (i->second.name.find("NSS") == 0)
 				continue;
 
-			if (!rdata_from_cache)
-				cache_insert(fqdn, af, i->first, ntohl(ttl));
+			rdlen = htons(i->first.size());
 
-			// answer name is compression ptr to orig qname
-			reply += string(reinterpret_cast<char *>(&clbl), sizeof(clbl));
-			reply += string(reinterpret_cast<char *>(&qtype), sizeof(qtype));
+			reply += i->second.name;
+			reply += string(reinterpret_cast<char *>(&i->second.qtype), sizeof(i->second.qtype));
 			reply += string(reinterpret_cast<char *>(&qclass), sizeof(qclass));
-			reply += string(reinterpret_cast<char *>(&ttl), sizeof(ttl));
+			reply += string(reinterpret_cast<char *>(&i->second.ttl), sizeof(i->second.ttl));
 			reply += string(reinterpret_cast<char *>(&rdlen), sizeof(rdlen));
 			reply += i->first;
 

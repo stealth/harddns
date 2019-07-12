@@ -29,6 +29,7 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include "ssl.h"
 #include "misc.h"
@@ -39,6 +40,7 @@ extern "C" {
 #include <openssl/x509.h>
 #include <openssl/evp.h>
 #include <openssl/err.h>
+#include <openssl/asn1.h>
 }
 
 
@@ -52,7 +54,10 @@ ssl_box *ssl_conn = nullptr;
 
 static int tcp_connect(const char *host, uint16_t port = 443)
 {
-	int sock = -1, one = 1;
+	int sock = -1;
+#ifdef TCP_FASTOPEN_CONNECT
+	int one = 1;
+#endif
 	struct sockaddr_in sin;
 	struct sockaddr_in6 sin6;
 
@@ -126,12 +131,19 @@ int ssl_box::setup_ctx()
 	if ((unsigned long)(SSL_CTX_set_options(d_ssl_ctx, op) & op) != (unsigned long)op)
 		return build_error("SSL_CTX_set_options:", -1);
 
-	if (SSL_CTX_load_verify_locations(d_ssl_ctx, NULL, "/etc/ssl/certs") != 1)
+	struct stat st;
+	const char *cafile = "/etc/ssl/cert.pem";
+	if (stat(cafile, &st) < 0) {
+		cafile = "/etc/openssl/cert.pem";
+		if (stat(cafile, &st) < 0)
+			cafile = nullptr;
+	}
+
+	if (SSL_CTX_load_verify_locations(d_ssl_ctx, cafile, "/etc/ssl/certs") != 1)
 		return build_error("SSL_CTX_load_verify_locations:", -1);
 
-	if (SSL_CTX_load_verify_locations(d_ssl_ctx, NULL, "/etc/openssl/certs") != 1)
+	if (SSL_CTX_load_verify_locations(d_ssl_ctx, nullptr, "/etc/openssl/certs") != 1)
 		return build_error("SSL_CTX_load_verify_locations:", -1);
-
 
 	if (SSL_CTX_set_default_verify_paths(d_ssl_ctx) != 1)
 		return build_error("SSL_CTX_set_default_verify_dirs: %s\n", -1);

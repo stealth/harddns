@@ -5,8 +5,7 @@ all:
 	make -C src
 
 install:
-
-	./install.pl
+	perl ./install.pl
 
 clean:
 	make -C src clean

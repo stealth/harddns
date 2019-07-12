@@ -33,7 +33,9 @@
 #include <mutex>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
 #include <netinet/in.h>
+#include "net-headers.h"
 #include "dnshttps.h"
 #include "config.h"
 #include "ssl.h"
@@ -49,6 +51,7 @@
 
 using namespace std;
 using namespace harddns;
+using namespace net_headers;
 
 
 #if 0
@@ -80,8 +83,9 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
                               char *buffer, size_t buflen, int *errnop,
                               int *herrnop, int32_t *ttlp, char **canonp)
 {
-	uint32_t ttl = 0;
-	char *r_name = nullptr, *r_alias = nullptr, **r_aliases = nullptr, *r_addr = nullptr, **r_addr_list = nullptr;
+	uint32_t ttl = 60*60;
+	uint16_t qtype = htons(dns_type::A);
+	char *r_name = nullptr, **r_aliases = nullptr, *r_addr = nullptr, **r_addr_list = nullptr;
 	size_t naddr = 0, cnames = 0, i = 0;
 	size_t nameLen = 0, need = 0, idx = 0, cname_len = 0;
 	int alen = 4, r = 0;
@@ -89,10 +93,12 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 	if (af != AF_INET6 && af != AF_INET)
 		return NSS_STATUS_TRYAGAIN;
 
-	if (af == AF_INET6)
+	if (af == AF_INET6) {
+		qtype = htons(dns_type::AAAA);
 		alen = 16;
+	}
 
-	map<string, string> res;
+	dnshttps::dns_reply res;
 	string raw = "";
 
 	{
@@ -104,9 +110,9 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 		// up to 5 levels of DNS recursion for CNAMEs
 		string s = name;
 		for (i = 0; s.size() > 0 && i < 5; ++i) {
-			r = dns->get(s, af, res, ttl, raw);
-			if (raw.size() && config::log_requests)
-				syslog(LOG_INFO, "%s %s? -> %s", name, af == AF_INET ? "A" : "AAAA", raw.c_str());
+			r = dns->get(s, qtype, res, raw);
+			if (config::log_requests)
+				syslog(LOG_INFO, "nss %s %s? -> %s", name, af == AF_INET ? "A" : "AAAA", raw.c_str());
 			if (r < 0) {
 				syslog(LOG_INFO, "%s", dns->why());
 				return NSS_STATUS_TRYAGAIN;
@@ -115,7 +121,7 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 			s = "";
 			unsigned int level = 0;
 			for (auto it = res.begin(); it != res.end() && s.size() == 0; ++it) {
-				if (it->second == "CNAME" && level++ == i) {
+				if (it->second.name == "NSS CNAME" && level++ == i) {
 					s = it->first;
 				}
 			}
@@ -124,11 +130,11 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 
 	naddr = 0;
 	for (auto it = res.begin(); it != res.end(); ++it) {
-		if (af == AF_INET && it->second == "A")
+		if (af == AF_INET && it->second.qtype == htons(dns_type::A))
 			++naddr;
-		if (af == AF_INET6 && it->second == "AAAA")
+		if (af == AF_INET6 && it->second.qtype == htons(dns_type::AAAA))
 			++naddr;
-		if (it->second == "CNAME") {
+		if (it->second.name == "NSS CNAME") {
 			cname_len += ALIGN(it->first.size() + 1);
 			++cnames;
 		}
@@ -160,28 +166,30 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 	idx = ALIGN(nameLen + 1);
 
 	/* Second, create aliases array and aliases double ptr */
-	r_alias = buffer + idx;
+	//r_alias = buffer + idx;
 	r_aliases = reinterpret_cast<char **>(buffer + idx + cname_len);
 	i = 0;
 	for (auto it = res.begin(); it != res.end(); ++it) {
-		if (it->second != "CNAME")
+		if (it->second.name != "NSS CNAME")
 			continue;
-		memcpy(r_alias + idx, it->first.c_str(), it->first.size() + 1);	// includes \0 terminator
-		r_aliases[i++] = r_alias + idx;
+		memcpy(buffer + idx, it->first.c_str(), it->first.size() + 1);	// includes \0 terminator
+		r_aliases[i++] = buffer + idx;
 		idx += ALIGN(it->first.size() + 1);
 	}
 
 	r_aliases[i] = nullptr;
-	idx += sizeof(char *);
+	idx += (i + 1) * sizeof(char *);
 
 	/* Third, append addresses */
 	r_addr = buffer + idx;
 	i = 0;
 	for (auto it = res.begin(); it != res.end(); ++it) {
-		if (af == AF_INET && it->second != "A")
+		if (af == AF_INET && it->second.qtype != htons(dns_type::A))
 			continue;
-		if (af == AF_INET6 && it->second != "AAAA")
+		if (af == AF_INET6 && it->second.qtype != htons(dns_type::AAAA))
 			continue;
+		if (ttl > ntohl(it->second.ttl))
+			ttl = ntohl(it->second.ttl);
 		memcpy(r_addr + i*ALIGN(alen), it->first.data(), alen);
 		++i;
 	}
@@ -243,14 +251,14 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
                               char *buffer, size_t buflen, int *errnop,
                               int *herrnop, int32_t *ttlp)
 {
-	uint32_t ttl = 0;
+	uint32_t ttl = 60*60;
 	size_t naddr = 0;
 	size_t nameLen = 0, need = 0, idx = 0;
 	struct gaih_addrtuple *r_tuple = nullptr, *r_tuple_first = nullptr;
 	char *r_name = nullptr;
 	int r = 0;
 
-	map<string, string> res;
+	dnshttps::dns_reply res;
 	string raw = "";
 
 	{
@@ -263,18 +271,20 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 		string s = name;
 		for (int i = 0; s.size() > 0 && i < 5; ++i) {
 
-			r = dns->get(s, AF_INET, res, ttl, raw);
-			if (raw.size() && config::log_requests)
-				syslog(LOG_INFO, "%s A? -> %s", name, raw.c_str());
+			// A
+			r = dns->get(s, htons(dns_type::A), res, raw);
+			if (config::log_requests)
+				syslog(LOG_INFO, "nss %s A? -> %s", name, raw.c_str());
 			if (r < 0) {
 				syslog(LOG_INFO, "%s", dns->why());
 				return NSS_STATUS_TRYAGAIN;
 			} else if (r == 1)
 				naddr = 1;
 
-			r = dns->get(s, AF_INET6, res, ttl, raw);
+			// AAAA
+			r = dns->get(s, htons(dns_type::AAAA), res, raw);
 			if (raw.size() && config::log_requests)
-				syslog(LOG_INFO, "%s AAAA? -> %s", name, raw.c_str());
+				syslog(LOG_INFO, "nss %s AAAA? -> %s", name, raw.c_str());
 			if (r < 0) {
 				syslog(LOG_INFO, "%s", dns->why());
 				return NSS_STATUS_TRYAGAIN;
@@ -284,7 +294,7 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 			s = "";
 			int level = 0;
 			for (auto it = res.begin(); s.size() == 0 && it != res.end(); ++it) {
-				if (it->second == "CNAME" && level++ == i) {
+				if (it->second.name == "NSS CNAME" && level++ == i) {
 					s = it->first;
 				}
 			}
@@ -293,7 +303,7 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 
 	naddr = 0;
 	for (auto it = res.begin(); it != res.end(); ++it) {
-		if (it->second == "A" || it->second == "AAAA")
+		if (it->second.qtype == htons(dns_type::A) || it->second.qtype == htons(dns_type::AAAA))
 			++naddr;
 	}
 	if (naddr == 0)
@@ -324,8 +334,10 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 	size_t i = 0;
 	r_tuple_first = reinterpret_cast<struct gaih_addrtuple *>(buffer + idx);
 	for (auto it = res.begin(); it != res.end(); ++it) {
-		if (it->second != "A" && it->second != "AAAA")
+		if (it->second.qtype != htons(dns_type::A) && it->second.qtype != htons(dns_type::AAAA))
 			continue;
+		if (ttl > it->second.ttl)
+			ttl = it->second.ttl;
 		r_tuple = reinterpret_cast<struct gaih_addrtuple *>(buffer + idx);
 		if (++i == naddr)
 			r_tuple->next = nullptr;
@@ -333,7 +345,7 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 			r_tuple->next = reinterpret_cast<struct gaih_addrtuple *>(buffer + idx + ALIGN(sizeof(struct gaih_addrtuple)));
 		idx += ALIGN(sizeof(struct gaih_addrtuple));
 		r_tuple->name = r_name;
-		r_tuple->family = it->second == "A" ? AF_INET : AF_INET6;
+		r_tuple->family = it->second.qtype == htons(dns_type::A) ? AF_INET : AF_INET6;
 		r_tuple->scopeid = 0;
 		memcpy(r_tuple->addr, it->first.data(), it->first.size());
 	}

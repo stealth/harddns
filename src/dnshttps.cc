@@ -70,14 +70,14 @@ static bool valid_name(const string &name)
 
 
 // construct a DNS query for rfc8484
-string make_query(const string &name, int af)
+string make_query(const string &name, uint16_t qtype)
 {
 	timeval tv = {0, 0};
 	gettimeofday(&tv, nullptr);
 
 	string dns_query = "", qname = "", b64query = "";
 
-	uint16_t qclass = htons(1), qtype = (af == AF_INET ? htons(dns_type::A) : htons(dns_type::AAAA));
+	uint16_t qclass = htons(1);
 
 	dnshdr qhdr;
 	qhdr.q_count = htons(1);
@@ -104,7 +104,7 @@ string make_query(const string &name, int af)
 // https://www.quad9.net/doh-quad9-dns-servers
 // https://tools.ietf.org/html/rfc8484
 
-int dnshttps::get(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw)
+int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string &raw)
 {
 	// don't:
 	//result.clear();
@@ -139,19 +139,23 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 		string req = "GET " + get, reply = "", tmp = "";
 
 		if (cfg->second.rfc8484) {
-			string b64 = make_query(name, af);
+			string b64 = make_query(name, qtype);
 			if (!b64.size())
 				return build_error("Failed to create rfc8484 request.", -1);
 			req += b64;
 		} else {
 			req += name;
 
-			if (af == AF_INET)
+			if (qtype == htons(dns_type::A))
 				req += "&type=A";
-			else if (af == AF_INET6)
+			else if (qtype == htons(dns_type::AAAA))
 				req += "&type=AAAA";
+			else if (qtype == htons(dns_type::NS))
+				req += "&type=NS";
+			else if (qtype == htons(dns_type::MX))
+				req += "&type=MX";
 			else
-				req += "&type=A";
+				return build_error("Can't handle query type.", -1);
 		}
 
 		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.53\r\nConnection: Keep-Alive\r\n";
@@ -234,9 +238,9 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 			ssl->close();
 		else {
 			if (cfg->second.rfc8484)
-				return parse_rfc8484(name, af, result, ttl, raw, reply, content_idx, cl);
+				return parse_rfc8484(name, qtype, result, raw, reply, content_idx, cl);
 			else
-				return parse_json(name, af, result, ttl, raw, reply, content_idx, cl);
+				return parse_json(name, qtype, result, raw, reply, content_idx, cl);
 		}
 	}
 
@@ -244,7 +248,7 @@ int dnshttps::get(const string &name, int af, map<string, string> &result, uint3
 }
 
 
-int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw, const string &reply, string::size_type content_idx, size_t cl)
+int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result, string &raw, const string &reply, string::size_type content_idx, size_t cl)
 {
 	string dns_reply = "", tmp = "";
 	string::size_type idx = string::npos, aidx = string::npos;
@@ -280,7 +284,7 @@ int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &res
 
 	// For rfc8484, do not pass around the raw (binary) message, which would potentially
 	// be used for logging. Unused by now.
-	raw = "";
+	raw = "rfc8484 answer";
 
 	if (dns_reply.size() < sizeof(dnshdr) + 5)
 		return build_error("Invalid reply.", -1);
@@ -304,10 +308,8 @@ int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &res
 	idx += qnlen + 2*sizeof(uint16_t);
 	aidx = idx;
 
-	ttl = 60*60;
-
 	uint16_t rdlen = 0, qtype = 0, qclass = 0;
-	uint32_t cttl = 0;
+	uint32_t ttl = 0;
 
 	// first of all, find all CNAMEs for desired name
 	map<string, int> fqdns{{fqdn, 1}};
@@ -328,9 +330,7 @@ int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &res
 		idx += sizeof(uint16_t);
 		qclass = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint16_t);
-		cttl = ntohl(*reinterpret_cast<const uint32_t *>(dns_reply.c_str() + idx));
-		if (ttl > cttl)
-			ttl = cttl;
+		ttl = *reinterpret_cast<const uint32_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint32_t);
 		rdlen = ntohs(*reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx));
 		idx += sizeof(uint16_t);
@@ -340,10 +340,14 @@ int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &res
 
 		if (qtype == htons(dns_type::CNAME)) {
 			if (qname2host(dns_reply, cname, idx) <= 0)
-				return build_error("Invalid reply.", -1);;
+				return build_error("Invalid reply.", -1);
 
-			if (fqdns.count(aname) > 0)
+			if (fqdns.count(aname) > 0) {
 				fqdns[cname] = 1;
+
+				// For NSS module, to have fqdn aliases w/o decoding avail
+				result[cname] = {"NSS CNAME", 0, 0, ntohl(ttl)};
+			}
 		}
 
 		idx += rdlen;
@@ -365,28 +369,47 @@ int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &res
 		idx += sizeof(uint16_t);
 		qclass = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint16_t);
-
-		// TTL. was already calculated last loop
+		ttl = *reinterpret_cast<const uint32_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint32_t);
-
 		rdlen = ntohs(*reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx));
 		idx += sizeof(uint16_t);
 
 		if (idx + rdlen > dns_reply.size() || qclass != htons(1) || rdlen == 0)
 			return build_error("Invalid reply.", -1);
 
+		// Need to call host2qname() on orig embedded answer name,
+		// because it may contain compression
+		string qname = "";
+		if (host2qname(aname, qname) <= 0)
+			return build_error("Invalid reply.", -1);
+
+		answer_t dns_ans{qname, qtype, qclass, ttl};
+
 		if (qtype == htons(dns_type::A) && fqdns.count(aname) > 0) {
 			if (rdlen != 4)
 				return build_error("Invalid reply.", -1);
-			result[dns_reply.substr(idx, 4)] = "A";
-			if (af == AF_INET || af == AF_UNSPEC)
-				has_answer = 1;
+			result[dns_reply.substr(idx, 4)] = dns_ans;
+			has_answer = 1;
 		} else if (qtype == htons(dns_type::AAAA) && fqdns.count(aname) > 0) {
 			if (rdlen != 16)
 				return build_error("Invalid reply.", -1);
-			result[dns_reply.substr(idx, 16)] = "AAAA";
-			if (af == AF_INET6 || af == AF_UNSPEC)
-				has_answer = 1;
+			result[dns_reply.substr(idx, 16)] = dns_ans;
+			has_answer = 1;
+		} else if (qtype == htons(dns_type::CNAME)) {
+			string qcname = "";
+			// uncompress cname answer
+			if (qname2host(dns_reply, cname, idx) <= 0)
+				return build_error("Invalid reply.", -1);
+			if (host2qname(cname, qcname) <= 0)
+				return build_error("Invalid reply.", -1);
+			result[qcname] = dns_ans;
+		} else if (qtype == htons(dns_type::NS) && qtype == type) {
+			//XXX: handle decompression
+			result[dns_reply.substr(idx, rdlen)] = dns_ans;
+			has_answer = 1;
+		} else if (qtype == htons(dns_type::MX) && qtype == type) {
+			result[dns_reply.substr(idx, rdlen)] = dns_ans;
+			has_answer = 1;
 		}
 
 		idx += rdlen;
@@ -396,7 +419,7 @@ int dnshttps::parse_rfc8484(const string &name, int af, map<string, string> &res
 }
 
 
-int dnshttps::parse_json(const string &name, int af, map<string, string> &result, uint32_t &ttl, string &raw, const string &reply, string::size_type content_idx, size_t cl)
+int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, string &raw, const string &reply, string::size_type content_idx, size_t cl)
 {
 	bool has_answer = 0;
 
@@ -446,12 +469,12 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 	idx += 10;
 	aidx = idx;
 
-	ttl = 60*60;
-
 	// first of all, find all CNAMEs
-	vector<string> fqdns{name};
+	map<string, int> fqdns{{name, 1}};
 	string s = name;
 	for (int level = 0; level < 10; ++level) {
+		if (!valid_name(s))
+			return build_error("Invalid DNS name.", -1);;
 		string cname = "\"name\":\"" + s;
 		if (s[s.size() - 1] != '.')
 			cname += ".";
@@ -461,10 +484,7 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 			break;
 		idx += cname.size();
 
-		// take minimum ttl
-		uint32_t cttl = strtoul(json.c_str() + idx, nullptr, 10);
-		if (ttl > cttl)
-			ttl = cttl;
+		uint32_t ttl = strtoul(json.c_str() + idx, nullptr, 10);
 		if ((idx = json.find("\"data\":\"", idx)) == string::npos)
 			break;
 		idx += 8;
@@ -475,39 +495,53 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 		if (!valid_name(tmp))
 			return build_error("Invalid DNS name.", -1);
 
-		result[tmp] = "CNAME";
-		fqdns.push_back(tmp);
-		//printf(">>>> CNAME %s -> %s\n", s.c_str(), tmp.c_str());
+		if (tmp[tmp.size() - 1] == '.')
+			tmp.erase(tmp.size() - 1, 1);
+
+		string qname = "", cqname = "";
+		if (host2qname(s, qname) <= 0)
+			break;
+		if (host2qname(tmp, cqname) <= 0)
+			break;
+
+		answer_t dns_ans{qname, htons(dns_type::CNAME), htons(1), htonl(ttl)};
+		result[cqname] = dns_ans;
+
+		// for NSS module, to have fqdn alias w/o decoding avail
+		result[tmp] = {"NSS CNAME", 0, 0, ttl};
+
+		if (fqdns.count(s) > 0)
+			fqdns[tmp] = 1;
+
+		//syslog(LOG_INFO, ">>>> CNAME %s -> %s\n", s.c_str(), tmp.c_str());
 		s = tmp;
 	}
 
-	idx = aidx;
-
-	// now for the A and AAAA records for original name and all CNAMEs
+	// now for the other records for original name and all CNAMEs
 	for (auto it = fqdns.begin(); it != fqdns.end(); ++it) {
 
-		//printf(">>>> A/AAAA for %s\n", it->c_str());
+		if (!valid_name(it->first))
+			continue;
 
-		char data[16] = {0};
+		for (idx = aidx; idx <= json.size();) {
 
-		string v4a = "\"name\":\"" + *it;
-		if ((*it)[it->size() - 1] != '.')
-			v4a += ".";
-		v4a += "\",\"type\":1,\"TTL\":";
+			char data[16] = {0};
 
-		string v6a = "\"name\":\"" + *it;
-		if ((*it)[it->size() - 1] != '.')
-			v6a += ".";
-		v6a += "\",\"type\":28,\"TTL\":";
-
-		for (;af == AF_INET || af == AF_UNSPEC;) {
-			if ((idx = json.find(v4a, idx)) == string::npos)
+			string ans = "\"name\":\"" + it->first;
+			if ((it->first)[it->first.size() - 1] != '.')
+				ans += ".";
+			ans += "\",\"type\":";
+			if ((idx = json.find(ans, idx)) == string::npos)
 				break;
-			idx += v4a.size();
+			idx += ans.size();
+			uint16_t atype = (uint16_t)strtoul(json.c_str() + idx, nullptr, 10);
 
-			uint32_t cttl = strtoul(json.c_str() + idx, nullptr, 10);
-			if (ttl > cttl)
-				ttl = cttl;
+			ans = ",\"TTL\":";
+			if ((idx = json.find(ans, idx)) == string::npos)
+				break;
+			idx += ans.size();
+
+			uint32_t ttl = strtoul(json.c_str() + idx, nullptr, 10);
 			if ((idx = json.find("\"data\":\"", idx)) == string::npos)
 				break;
 			idx += 8;
@@ -515,37 +549,38 @@ int dnshttps::parse_json(const string &name, int af, map<string, string> &result
 				break;
 			tmp = json.substr(idx, idx2 - idx);
 			idx = idx2;
-			if (inet_pton(AF_INET, tmp.c_str(), data) == 1) {
-				//printf(">>>> AF_INET -> %s\n", tmp.c_str());
-				result[string(data, 4)] = "A";
+
+			string qname = "";
+			if (host2qname(it->first, qname) <= 0)
+				break;
+
+			answer_t dns_ans{qname, htons(atype), htons(1), htonl(ttl)};
+
+			if (atype == dns_type::A) {
+				if (inet_pton(AF_INET, tmp.c_str(), data) == 1) {
+					//syslog(LOG_INFO, ">>>> AF_INET -> %s\n", tmp.c_str());
+					result.insert(make_pair(string(data, 4), dns_ans));
+					has_answer = 1;
+				}
+			} else if (atype == dns_type::AAAA) {
+				if (inet_pton(AF_INET6, tmp.c_str(), data) == 1) {
+					result.insert(make_pair(string(data, 16), dns_ans));
+					has_answer = 1;
+				}
+			} else if (atype == dns_type::NS) {
+				if (!valid_name(tmp))
+					return build_error("Invalid DNS name.", -1);
+
+				if (tmp[tmp.size() - 1] == '.')
+					tmp.erase(tmp.size() - 1, 1);
+
+				if (host2qname(tmp, qname) <= 0)
+					break;
+				result.insert(make_pair(qname, dns_ans));
 				has_answer = 1;
+			} else if (type == dns_type::MX) {
 			}
 		}
-
-		idx = aidx;
-
-		for (;af == AF_INET6 || af == AF_UNSPEC;) {
-			if ((idx = json.find(v6a, idx)) == string::npos)
-				break;
-			idx += v6a.size();
-
-			uint32_t cttl = strtoul(json.c_str() + idx, nullptr, 10);
-			if (ttl > cttl)
-				ttl = cttl;
-			if ((idx = json.find("\"data\":\"", idx)) == string::npos)
-				break;
-			idx += 8;
-			if ((idx2 = json.find("\"", idx)) == string::npos)
-				break;
-			tmp = json.substr(idx, idx2 - idx);
-			idx = idx2;
-			if (inet_pton(AF_INET6, tmp.c_str(), data) == 1) {
-				//printf(">>>> AF_INET6 -> %s\n", tmp.c_str());
-				result[string(data, 16)] = "AAAA";
-				has_answer = 1;
-			}
-		}
-
 	}
 
 	return has_answer ? 1 : 0;

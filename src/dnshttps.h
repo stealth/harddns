@@ -53,10 +53,25 @@ class dnshttps {
 		return r;
 	}
 
+public:
 
-	int parse_rfc8484(const std::string &, int, std::map<std::string, std::string> &, uint32_t &, std::string &, const std::string &, std::string::size_type, size_t);
+	struct answer_t {
+		std::string name;
+		uint16_t qtype, qclass;
+		uint32_t ttl;
+	};
 
-	int parse_json(const std::string &, int, std::map<std::string, std::string> &, uint32_t &, std::string &, const std::string &, std::string::size_type, size_t);
+	// bit unusual: the interesting rdata of the answer mapped to the rest of the answer section's info
+	using dns_reply = std::map<std::string, answer_t>;
+
+
+private:
+
+	int parse_rfc8484(const std::string &, uint16_t, dns_reply &, std::string &, const std::string &, std::string::size_type, size_t);
+
+	int parse_json(const std::string &, uint16_t, dns_reply &, std::string &, const std::string &, std::string::size_type, size_t);
+
+
 
 public:
 
@@ -75,7 +90,7 @@ public:
 		return err.c_str();
 	}
 
-	int get(const std::string &, int, std::map<std::string, std::string> &, uint32_t &, std::string &);
+	int get(const std::string &, uint16_t, dns_reply &, std::string &);
 
 };
 

@@ -6,17 +6,21 @@ LIBS=-lcrypto -lssl
 
 # If you have openssl or libressl with TLS1.3 support
 # (openssl since 1.1.1, you should add this in order to
-# benefit from faster TLS handshakes
+# benefit from faster TLS handshakes.
+# You also need to install and set apropriate path's for OSX (Darwin)
 #DEFS+=-I/opt/ssl/openssl-1.1.1/include
 #LIBS+=-L/opt/ssl/openssl-1.1.1/lib
+
+# Not necessary for OSX
 #LIBS+=-Wl,--rpath=/opt/ssl/openssl-1.1.1/lib
 
-# since Linux kernel 4.11
-DEFS+=-DTCP_FASTOPEN_CONNECT=30
 
 .PHONY: all clean distclean
 
 ifeq ($(shell uname), Linux)
+
+# since Linux kernel 4.11
+DEFS+=-DTCP_FASTOPEN_CONNECT=30
 
 all: build build/harddnsd build/libnss_harddns.so
 
