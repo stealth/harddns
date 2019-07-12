@@ -29,6 +29,9 @@ int host2qname(const std::string &, std::string &);
 
 int qname2host(const std::string &, std::string &, std::string::size_type idx = 0);
 
+bool valid_name(const std::string &);
+
+std::string lcs(const std::string &);
 
 template<typename T> using free_ptr = std::unique_ptr<T, void (*)(T *)>;
 

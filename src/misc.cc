@@ -19,6 +19,8 @@
 
 #include <string>
 #include <cstring>
+#include <cctype>
+#include <algorithm>
 
 
 namespace harddns {
@@ -145,6 +147,38 @@ int qname2host(const string &msg, string &result, string::size_type start_idx)
 	}
 
 	return r + 1;
+}
+
+
+// check charset, dont check label size
+bool valid_name(const string &name)
+{
+	size_t l = name.size();
+	if (l > 254 || l < 2)
+		return 0;
+
+	for (size_t i = 0; i < l; ++i) {
+		if (name[i] >= '0' && name[i] <= '9')
+			continue;
+		if (name[i] >= 'a' && name[i] <= 'z')
+			continue;
+		if (name[i] >= 'A' && name[i] <= 'Z')
+			continue;
+		if (name[i] == '-' || name[i] == '.')
+			continue;
+
+		return 0;
+	}
+
+	return 1;
+}
+
+
+string lcs(const string &s)
+{
+	string rs = s;
+	transform(rs.begin(), rs.end(), rs.begin(), [](unsigned char c){ return tolower(c); });
+	return rs;
 }
 
 

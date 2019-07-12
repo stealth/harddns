@@ -122,7 +122,6 @@ int doh_proxy::loop()
 	string fqdn = "", qname = "", raw = "", reply = "";
 	dnshttps::dns_reply result;
 	uint16_t qtype = 0, qclass = 0;
-	//uint16_t clbl = htons(((1<<15)|(1<<14))|sizeof(dnshdr));
 
 	if (d_af == AF_INET6) {
 		from = reinterpret_cast<sockaddr *>(&from6);

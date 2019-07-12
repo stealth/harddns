@@ -45,30 +45,6 @@ using namespace net_headers;
 dnshttps *dns = nullptr;
 
 
-// check charset, dont check label size
-static bool valid_name(const string &name)
-{
-	size_t l = name.size();
-	if (l > 254 || l < 2)
-		return 0;
-
-	for (size_t i = 0; i < l; ++i) {
-		if (name[i] >= '0' && name[i] <= '9')
-			continue;
-		if (name[i] >= 'a' && name[i] <= 'z')
-			continue;
-		if (name[i] >= 'A' && name[i] <= 'Z')
-			continue;
-		if (name[i] == '-' || name[i] == '.')
-			continue;
-
-		return 0;
-	}
-
-	return 1;
-}
-
-
 // construct a DNS query for rfc8484
 string make_query(const string &name, uint16_t qtype)
 {
@@ -158,7 +134,7 @@ int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string 
 				return build_error("Can't handle query type.", -1);
 		}
 
-		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.53\r\nConnection: Keep-Alive\r\n";
+		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.54\r\nConnection: Keep-Alive\r\n";
 
 		if (cfg->second.rfc8484)
 			req += "Accept: application/dns-message\r\n";
@@ -274,7 +250,7 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 			if (cl == 0)
 				break;
 
-			if (cl > 65535 || nl + 2 + cl > reply.size())
+			if (cl > 65535 || nl + 2 + cl + 2 > reply.size())
 				return build_error("Invalid reply.", -1);
 			idx = nl + 2;
 			dns_reply += reply.substr(idx, cl);
@@ -299,10 +275,11 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 
 	string aname = "", cname = "", fqdn = "";
 	idx = sizeof(dnshdr);
-	int qnlen = qname2host(dns_reply, fqdn, idx);
+	int qnlen = qname2host(dns_reply, tmp, idx);
 	if (qnlen <= 0 || idx + qnlen + 2*sizeof(uint16_t) >= dns_reply.size())
 		return build_error("Invalid reply.", -1);
-	if (string(name + ".") != fqdn)
+	fqdn = lcs(tmp);
+	if (lcs(string(name + ".")) != fqdn)
 		return build_error("Wrong name in awnser.", -1);
 
 	idx += qnlen + 2*sizeof(uint16_t);
@@ -319,8 +296,9 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 			break;
 
 		// also handles compressed labels
-		if ((qnlen = qname2host(dns_reply, aname, idx)) <= 0)
-			return build_error("Invalid reply.", -1);;
+		if ((qnlen = qname2host(dns_reply, tmp, idx)) <= 0)
+			return build_error("Invalid reply.", -1);
+		aname = lcs(tmp);
 
 		// 10 -> qtype, qclass, ttl, rdlen
 		if (idx + qnlen + 10 >= dns_reply.size())
@@ -339,8 +317,9 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 			return build_error("Invalid reply.", -1);
 
 		if (qtype == htons(dns_type::CNAME)) {
-			if (qname2host(dns_reply, cname, idx) <= 0)
+			if (qname2host(dns_reply, tmp, idx) <= 0)
 				return build_error("Invalid reply.", -1);
+			cname = lcs(tmp);
 
 			if (fqdns.count(aname) > 0) {
 				fqdns[cname] = 1;
@@ -358,6 +337,8 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 		if (idx >= dns_reply.size())
 			break;
 
+		// unlike in CNAME parsing loop, do not convert answer to lowercase,
+		// as we want to put original name into answer
 		if ((qnlen = qname2host(dns_reply, aname, idx)) <= 0)
 			return build_error("Invalid reply.", -1);
 
@@ -385,12 +366,12 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 
 		answer_t dns_ans{qname, qtype, qclass, ttl};
 
-		if (qtype == htons(dns_type::A) && fqdns.count(aname) > 0) {
+		if (qtype == htons(dns_type::A) && fqdns.count(lcs(aname)) > 0) {
 			if (rdlen != 4)
 				return build_error("Invalid reply.", -1);
 			result[dns_reply.substr(idx, 4)] = dns_ans;
 			has_answer = 1;
-		} else if (qtype == htons(dns_type::AAAA) && fqdns.count(aname) > 0) {
+		} else if (qtype == htons(dns_type::AAAA) && fqdns.count(lcs(aname)) > 0) {
 			if (rdlen != 16)
 				return build_error("Invalid reply.", -1);
 			result[dns_reply.substr(idx, 16)] = dns_ans;
@@ -446,7 +427,7 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 			if (cl == 0)
 				break;
 
-			if (cl > 65535 || nl + 2 + cl > reply.size())
+			if (cl > 65535 || nl + 2 + cl + 2 > reply.size())
 				return build_error("Invalid reply.", -1);
 			idx = nl + 2;
 			json += reply.substr(idx, cl);
@@ -455,6 +436,7 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 	}
 
 	raw = json;
+	json = lcs(raw);
 
 	//printf(">>>> %s @ %s\n", name.c_str(), raw.c_str());
 
@@ -462,23 +444,23 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 	// Turns out, C++ data structures were not really made for JSON. Maybe CORBA...
 	json.erase(remove(json.begin(), json.end(), ' '), json.end());
 
-	if (json.find("{\"Status\":0") != 0)
+	if (json.find("{\"status\":0") != 0)
 		return 0;
-	if ((idx = json.find("\"Answer\":[")) == string::npos)
+	if ((idx = json.find("\"answer\":[")) == string::npos)
 		return 0;
 	idx += 10;
 	aidx = idx;
 
 	// first of all, find all CNAMEs
-	map<string, int> fqdns{{name, 1}};
-	string s = name;
+	string s = lcs(name);
+	map<string, int> fqdns{{s, 1}};
 	for (int level = 0; level < 10; ++level) {
 		if (!valid_name(s))
 			return build_error("Invalid DNS name.", -1);;
 		string cname = "\"name\":\"" + s;
 		if (s[s.size() - 1] != '.')
 			cname += ".";
-		cname += "\",\"type\":5,\"TTL\":";
+		cname += "\",\"type\":5,\"ttl\":";
 
 		if ((idx = json.find(cname, idx)) == string::npos)
 			break;
@@ -536,7 +518,7 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 			idx += ans.size();
 			uint16_t atype = (uint16_t)strtoul(json.c_str() + idx, nullptr, 10);
 
-			ans = ",\"TTL\":";
+			ans = ",\"ttl\":";
 			if ((idx = json.find(ans, idx)) == string::npos)
 				break;
 			idx += ans.size();
