@@ -135,7 +135,7 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 		if (af == AF_INET6 && it->second.qtype == htons(dns_type::AAAA))
 			++naddr;
 		if (it->second.name == "NSS CNAME") {
-			cname_len += ALIGN(it->first.size() + 1);
+			cname_len += ALIGN(it->second.rdata.size() + 1);
 			++cnames;
 		}
 	}
@@ -172,9 +172,9 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 	for (auto it = res.begin(); it != res.end(); ++it) {
 		if (it->second.name != "NSS CNAME")
 			continue;
-		memcpy(buffer + idx, it->first.c_str(), it->first.size() + 1);	// includes \0 terminator
+		memcpy(buffer + idx, it->second.rdata.c_str(), it->second.rdata.size() + 1);	// includes \0 terminator
 		r_aliases[i++] = buffer + idx;
-		idx += ALIGN(it->first.size() + 1);
+		idx += ALIGN(it->second.rdata.size() + 1);
 	}
 
 	r_aliases[i] = nullptr;
@@ -190,7 +190,7 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 			continue;
 		if (ttl > ntohl(it->second.ttl))
 			ttl = ntohl(it->second.ttl);
-		memcpy(r_addr + i*ALIGN(alen), it->first.data(), alen);
+		memcpy(r_addr + i*ALIGN(alen), it->second.rdata.data(), alen);
 		++i;
 	}
 
@@ -295,7 +295,7 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 			int level = 0;
 			for (auto it = res.begin(); s.size() == 0 && it != res.end(); ++it) {
 				if (it->second.name == "NSS CNAME" && level++ == i) {
-					s = it->first;
+					s = it->second.rdata;
 				}
 			}
 		}
@@ -347,7 +347,7 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 		r_tuple->name = r_name;
 		r_tuple->family = it->second.qtype == htons(dns_type::A) ? AF_INET : AF_INET6;
 		r_tuple->scopeid = 0;
-		memcpy(r_tuple->addr, it->first.data(), it->first.size());
+		memcpy(r_tuple->addr, it->second.rdata.data(), it->second.rdata.size());
 	}
 
 	if (*pat)

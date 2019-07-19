@@ -19,6 +19,7 @@
 
 #include <map>
 #include <string>
+#include <cstring>
 #include <utility>
 #include <syslog.h>
 #include <sys/time.h>
@@ -209,20 +210,25 @@ int doh_proxy::loop()
 
 		uint16_t rdlen = 0, n_answers = 0;
 
-		for (auto i = result.begin(); i != result.end(); ++i) {
+		// by using an integer to access the map like an vector index, we have
+		// the order of elements as they were inserted by dns->get() by increasing index
+		// as the records were parsed
+		for (unsigned int i = 0; i < result.size(); ++i) {
+
+			const auto &elem = result[i];
 
 			// skip the entries that were created for NSS module
-			if (i->second.name.find("NSS") == 0)
+			if (elem.name.find("NSS") == 0)
 				continue;
 
-			rdlen = htons(i->first.size());
+			rdlen = htons(elem.rdata.size());
 
-			reply += i->second.name;
-			reply += string(reinterpret_cast<char *>(&i->second.qtype), sizeof(i->second.qtype));
-			reply += string(reinterpret_cast<char *>(&qclass), sizeof(qclass));
-			reply += string(reinterpret_cast<char *>(&i->second.ttl), sizeof(i->second.ttl));
-			reply += string(reinterpret_cast<char *>(&rdlen), sizeof(rdlen));
-			reply += i->first;
+			reply += elem.name;
+			reply += string(reinterpret_cast<const char *>(&elem.qtype), sizeof(elem.qtype));
+			reply += string(reinterpret_cast<const char *>(&elem.qclass), sizeof(elem.qclass));
+			reply += string(reinterpret_cast<const char *>(&elem.ttl), sizeof(elem.ttl));
+			reply += string(reinterpret_cast<const char *>(&rdlen), sizeof(rdlen));
+			reply += elem.rdata;
 
 			++n_answers;
 		}

@@ -229,6 +229,7 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 	string dns_reply = "", tmp = "";
 	string::size_type idx = string::npos, aidx = string::npos;
 	bool has_answer = 0;
+	unsigned int acnt = 0;
 
 	if (cl > 0 && content_idx != string::npos) {
 		dns_reply = reply.substr(content_idx);
@@ -325,7 +326,7 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 				fqdns[cname] = 1;
 
 				// For NSS module, to have fqdn aliases w/o decoding avail
-				result[cname] = {"NSS CNAME", 0, 0, ntohl(ttl)};
+				result[acnt++] = {"NSS CNAME", 0, 0, ntohl(ttl), cname};
 			}
 		}
 
@@ -369,12 +370,14 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 		if (qtype == htons(dns_type::A) && fqdns.count(lcs(aname)) > 0) {
 			if (rdlen != 4)
 				return build_error("Invalid reply.", -1);
-			result[dns_reply.substr(idx, 4)] = dns_ans;
+			dns_ans.rdata = dns_reply.substr(idx, 4);
+			result[acnt++] = dns_ans;
 			has_answer = 1;
 		} else if (qtype == htons(dns_type::AAAA) && fqdns.count(lcs(aname)) > 0) {
 			if (rdlen != 16)
 				return build_error("Invalid reply.", -1);
-			result[dns_reply.substr(idx, 16)] = dns_ans;
+			dns_ans.rdata = dns_reply.substr(idx, 16);
+			result[acnt++] = dns_ans;
 			has_answer = 1;
 		} else if (qtype == htons(dns_type::CNAME)) {
 			string qcname = "";
@@ -383,13 +386,16 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 				return build_error("Invalid reply.", -1);
 			if (host2qname(cname, qcname) <= 0)
 				return build_error("Invalid reply.", -1);
-			result[qcname] = dns_ans;
+			dns_ans.rdata = qcname;
+			result[acnt++] = dns_ans;
 		} else if (qtype == htons(dns_type::NS) && qtype == type) {
 			//XXX: handle decompression
-			result[dns_reply.substr(idx, rdlen)] = dns_ans;
+			dns_ans.rdata = dns_reply.substr(idx, rdlen);
+			result[acnt++] = dns_ans;
 			has_answer = 1;
 		} else if (qtype == htons(dns_type::MX) && qtype == type) {
-			result[dns_reply.substr(idx, rdlen)] = dns_ans;
+			dns_ans.rdata = dns_reply.substr(idx, rdlen);
+			result[acnt++] = dns_ans;
 			has_answer = 1;
 		}
 
@@ -406,6 +412,7 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 
 	string::size_type idx = string::npos, idx2 = string::npos, aidx = string::npos;
 	string json = "", tmp = "";
+	unsigned int acnt = 0;
 
 	if (cl > 0 && content_idx != string::npos) {
 		json = reply.substr(content_idx);
@@ -486,11 +493,10 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 		if (host2qname(tmp, cqname) <= 0)
 			break;
 
-		answer_t dns_ans{qname, htons(dns_type::CNAME), htons(1), htonl(ttl)};
-		result[cqname] = dns_ans;
+		result[acnt++] = {qname, htons(dns_type::CNAME), htons(1), htonl(ttl), cqname};
 
 		// for NSS module, to have fqdn alias w/o decoding avail
-		result[tmp] = {"NSS CNAME", 0, 0, ttl};
+		result[acnt++] = {"NSS CNAME", 0, 0, ttl, tmp};
 
 		if (fqdns.count(s) > 0)
 			fqdns[tmp] = 1;
@@ -540,13 +546,14 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 
 			if (atype == dns_type::A) {
 				if (inet_pton(AF_INET, tmp.c_str(), data) == 1) {
-					//syslog(LOG_INFO, ">>>> AF_INET -> %s\n", tmp.c_str());
-					result.insert(make_pair(string(data, 4), dns_ans));
+					dns_ans.rdata = string(data, 4);
+					result[acnt++] = dns_ans;
 					has_answer = 1;
 				}
 			} else if (atype == dns_type::AAAA) {
 				if (inet_pton(AF_INET6, tmp.c_str(), data) == 1) {
-					result.insert(make_pair(string(data, 16), dns_ans));
+					dns_ans.rdata = string(data, 16);
+					result[acnt++] = dns_ans;
 					has_answer = 1;
 				}
 			} else if (atype == dns_type::NS) {
@@ -558,7 +565,8 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 
 				if (host2qname(tmp, qname) <= 0)
 					break;
-				result.insert(make_pair(qname, dns_ans));
+				dns_ans.rdata = qname;
+				result[acnt++] = dns_ans;
 				has_answer = 1;
 			} else if (type == dns_type::MX) {
 			}

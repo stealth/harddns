@@ -59,10 +59,11 @@ public:
 		std::string name;
 		uint16_t qtype, qclass;
 		uint32_t ttl;
+		std::string rdata;
 	};
 
-	// bit unusual: the interesting rdata of the answer mapped to the rest of the answer section's info
-	using dns_reply = std::map<std::string, answer_t>;
+	// we need it ordered
+	using dns_reply = std::map<unsigned int, answer_t>;
 
 
 private:
