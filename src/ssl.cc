@@ -307,13 +307,17 @@ ssize_t ssl_box::send(const string &buf, long to)
 
 ssize_t ssl_box::recv(string &s, long to)
 {
+	s = "";
+
 	if (!d_ssl)
 		return -1;
 
 	int r = 0;
 	char buf[4096] = {0};
-	long us = to/1000;
+	long us = to/(1000*2);	// half TO for select, other for potential repeated read's
+	long waiting = 0;
 	timeval tv = {(time_t)us/1000000, (suseconds_t)us%1000000};
+	timespec ts = {0, 10000000};	// 10ms
 
 	fd_set rset;
 	FD_ZERO(&rset);
@@ -325,20 +329,26 @@ ssize_t ssl_box::recv(string &s, long to)
 		return 0;
 	}
 
-	s = "";
+	for (; waiting < to/2;) {
+		r = SSL_read(d_ssl, buf, sizeof(buf) - 1);
+		switch (SSL_get_error(d_ssl, r)) {
+		case SSL_ERROR_NONE:
+			break;
+		case SSL_ERROR_WANT_WRITE:
+		case SSL_ERROR_WANT_READ:
+			r = 0;
+			break;
+		case SSL_ERROR_ZERO_RETURN:
+			return build_error("recv::SSL_read: Peer closed connection.", -1);
+		default:
+			return build_error("recv::SSL_read:", -1);
+		}
 
-	r = SSL_read(d_ssl, buf, sizeof(buf) - 1);
-	switch (SSL_get_error(d_ssl, r)) {
-	case SSL_ERROR_NONE:
-		break;
-	case SSL_ERROR_WANT_WRITE:
-	case SSL_ERROR_WANT_READ:
-		r = 0;
-		break;
-	case SSL_ERROR_ZERO_RETURN:
-		return build_error("recv::SSL_read: Peer closed connection.", -1);
-	default:
-		return build_error("recv::SSL_read:", -1);
+		if (r == 0) {
+			nanosleep(&ts, nullptr);
+			waiting += ts.tv_nsec;
+		} else if (r > 0)
+			break;
 	}
 
 	if (r > 0)
