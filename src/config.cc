@@ -20,10 +20,12 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <algorithm>
 #include <string>
 #include <list>
 #include <map>
+#include <stdint.h>
 #include <unistd.h>
 #include "config.h"
 
@@ -76,13 +78,15 @@ int parse_config(const string &cfgbase)
 		} else if (sline.find("nameserver=") == 0) {
 			ns = sline.substr(11);
 			config::ns->push_back(ns);
-			config::ns_cfg->insert(make_pair(ns, a_ns_cfg{ns, "no-cn", "no-host", "no-get", 0}));
+			config::ns_cfg->insert(make_pair(ns, a_ns_cfg{ns, "no-cn", "no-host", "no-get", 443, 0}));
 		} else if (sline.find("cn=") == 0) {
 			config::ns_cfg->find(ns)->second.cn = sline.substr(3);
 		} else if (sline.find("host=") == 0) {
 			config::ns_cfg->find(ns)->second.host = sline.substr(5);
 		} else if (sline.find("get=") == 0) {
 			config::ns_cfg->find(ns)->second.get = sline.substr(4);
+		} else if (sline.find("port=") == 0) {
+			config::ns_cfg->find(ns)->second.port = (uint16_t)strtoul(sline.c_str() + 5, nullptr, 10);
 		}
 	}
 

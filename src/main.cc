@@ -60,7 +60,7 @@ void close_fds()
 
 int main(int argc, char **argv)
 {
-	string banner = "\nharddns -- DoH proxy server v0.54\n\n"
+	string banner = "\nharddns -- DoH proxy server v0.55\n\n"
 	                "(C) 2019 Sebastian Krahmer https://github.com/stealth/harddns\n\n\n";
 
 	char c = 0;

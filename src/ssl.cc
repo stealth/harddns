@@ -199,14 +199,14 @@ static int post_connection_check(X509 *x509, const string &peer, string &cn)
 }
 
 
-int ssl_box::connect_ssl(const string &host)
+int ssl_box::connect_ssl(const string &host, uint16_t port = 443)
 {
 
 	this->close();
 
 	d_ns_ip = host;
 
-	if ((d_sock = tcp_connect(host.c_str())) < 0)
+	if ((d_sock = tcp_connect(host.c_str(), port)) < 0)
 		return build_error("connect_ssl::tcp_connect", -1);
 
 	if ((d_ssl = SSL_new(d_ssl_ctx)) == nullptr)

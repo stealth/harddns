@@ -21,6 +21,7 @@
 #include <string>
 #include <cstring>
 #include <utility>
+#include <stdint.h>
 #include <syslog.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -183,9 +184,10 @@ int doh_proxy::loop()
 		else if ((r = dns->get(fqdn, qtype, result, raw)) <= 0) {
 
 			answer.a_count = 0;
-			if (r < 0)
+			if (r < 0) {
 				answer.rcode = 2;
-			else
+				syslog(LOG_INFO, "proxy %s -> %s", fqdn.c_str(), dns->why());
+			} else
 				answer.rcode = 3;	// NXDOMAIN
 
 			reply = string(reinterpret_cast<char *>(&answer), sizeof(answer));

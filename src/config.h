@@ -21,6 +21,7 @@
 #ifndef harddns_config_h
 #define harddns_config_h
 
+#include <stdint.h>
 #include <string>
 #include <map>
 #include <list>
@@ -36,6 +37,7 @@ extern bool log_requests;
 
 struct a_ns_cfg {
 	std::string ip, cn, host, get;
+	uint16_t port;
 	bool rfc8484;
 };
 

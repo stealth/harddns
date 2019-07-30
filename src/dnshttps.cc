@@ -134,7 +134,7 @@ int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string 
 				return build_error("Can't handle query type.", -1);
 		}
 
-		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.54\r\nConnection: Keep-Alive\r\n";
+		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.55\r\nConnection: Keep-Alive\r\n";
 
 		if (cfg->second.rfc8484)
 			req += "Accept: application/dns-message\r\n";
@@ -151,7 +151,7 @@ int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string 
 
 		// maybe closed due to error or not initialized in the first place
 		if (ssl->send(req) <= 0) {
-			if (ssl->connect_ssl(ns) < 0) {
+			if (ssl->connect_ssl(ns, cfg->second.port) < 0) {
 				ssl->close();
 				syslog(LOG_INFO, "No SSL connection to %s (%s)", ns.c_str(), ssl->why());
 				continue;

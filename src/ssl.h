@@ -27,6 +27,7 @@
 #include <string>
 #include <memory>
 #include <cstring>
+#include <stdint.h>
 
 extern "C" {
 #include <openssl/ssl.h>
@@ -88,7 +89,7 @@ public:
 
 	int setup_ctx();
 
-	int connect_ssl(const std::string &);
+	int connect_ssl(const std::string &, uint16_t);
 
 	// 1s
 	ssize_t send(const std::string &, long to = 1000000000);
