@@ -22,6 +22,7 @@
 
 #include <memory>
 #include <string>
+#include <cctype>
 
 namespace harddns {
 
@@ -32,6 +33,8 @@ int qname2host(const std::string &, std::string &, std::string::size_type idx = 
 bool valid_name(const std::string &);
 
 std::string lcs(const std::string &);
+
+uint16_t ua_uint16(const void *);
 
 template<typename T> using free_ptr = std::unique_ptr<T, void (*)(T *)>;
 

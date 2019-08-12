@@ -157,8 +157,8 @@ int doh_proxy::loop()
 		// It's important here that qname may not contain compression (qname2host() called
 		// with start_idx = 0)
 
-		qtype = *reinterpret_cast<uint16_t *>(buf + sizeof(dnshdr) + qnlen);
-		qclass = *reinterpret_cast<uint16_t *>(buf + sizeof(dnshdr) + qnlen + sizeof(uint16_t));
+		qtype = ua_uint16(buf + sizeof(dnshdr) + qnlen);
+		qclass = ua_uint16(buf + sizeof(dnshdr) + qnlen + sizeof(uint16_t));
 
 		if (qtype != htons(dns_type::A) && qtype != htons(dns_type::AAAA))
 			continue;
