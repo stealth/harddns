@@ -182,5 +182,13 @@ string lcs(const string &s)
 }
 
 
+uint16_t ua_uint16(const void *vp)
+{
+	uint16_t x = 0;
+	memcpy(&x, vp, sizeof(x));
+	return x;
+}
+
+
 } // namespace
 
