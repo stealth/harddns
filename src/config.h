@@ -33,7 +33,7 @@ namespace config {
 
 
 extern std::list<std::string> *ns;
-extern bool log_requests;
+extern bool log_requests, nss_aaaa;
 
 struct a_ns_cfg {
 	std::string ip, cn, host, get;

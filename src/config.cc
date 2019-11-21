@@ -44,7 +44,7 @@ using namespace std;
 list<string> *ns = nullptr;
 map<string, struct a_ns_cfg> *ns_cfg = nullptr;
 
-bool log_requests = 0;
+bool log_requests = 0, nss_aaaa = 0;
 
 
 int parse_config(const string &cfgbase)
@@ -73,6 +73,8 @@ int parse_config(const string &cfgbase)
 
 		if (sline.find("log_requests") == 0)
 			config::log_requests = 1;
+		else if (sline.find("nss_aaaa") == 0)
+			config::nss_aaaa = 1;
 		else if (sline.find("rfc8484") == 0) {
 			config::ns_cfg->find(ns)->second.rfc8484 = 1;
 		} else if (sline.find("nameserver=") == 0) {

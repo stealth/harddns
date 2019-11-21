@@ -281,16 +281,22 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 			} else if (r == 1)
 				naddr = 1;
 
-			// AAAA
-			r = dns->get(s, htons(dns_type::AAAA), res, raw);
-			if (raw.size() && config::log_requests)
-				syslog(LOG_INFO, "nss %s AAAA? -> %s", name, raw.c_str());
-			if (r < 0) {
-				syslog(LOG_INFO, "%s", dns->why());
-				return NSS_STATUS_TRYAGAIN;
-			} else if (r == 1 || naddr == 1) {
-				break;
+			if ((_res.options & RES_USE_INET6) || config::nss_aaaa) {
+				// AAAA
+				r = dns->get(s, htons(dns_type::AAAA), res, raw);
+				if (raw.size() && config::log_requests)
+					syslog(LOG_INFO, "nss %s AAAA? -> %s", name, raw.c_str());
+				if (r < 0) {
+					syslog(LOG_INFO, "%s", dns->why());
+					return NSS_STATUS_TRYAGAIN;
+				} else if (r == 1) {
+					naddr = 1;
+				}
 			}
+
+			if (naddr == 1)
+				break;
+
 			s = "";
 			int level = 0;
 			for (auto it = res.begin(); s.size() == 0 && it != res.end(); ++it) {

@@ -139,7 +139,8 @@ during the TLS connect, otherwise the resolve will fail.
 Restart *nscd*, if it was running, and you are done. All `gethostbyname()`,
 `getaddrinfo()` etc. calls will now be handled by *harddns*. You can also watch it
 in action by viewing the system log files, if `log_requests` has been specified.
-
+If you have IPv6 connectivity and use the NSS module, you should enable
+`nss_aaaa` in `/etc/harddns/harddns.conf` in order to lookup AAAA records too.
 
 If your OS does not support NSS, just start
 

@@ -161,6 +161,8 @@ int ssl_box::setup_ctx()
 		return build_error("SSL_CTX_set_cipher_list:", -1);
 #endif
 
+	SSL_CTX_set_read_ahead(d_ssl_ctx, 0);
+
 	return 0;
 }
 
