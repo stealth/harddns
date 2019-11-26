@@ -213,10 +213,21 @@ int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string 
 		if (!has_answer)
 			ssl->close();
 		else {
+			int r = 0;
 			if (cfg->second.rfc8484)
-				return parse_rfc8484(name, qtype, result, raw, reply, content_idx, cl);
+				r = parse_rfc8484(name, qtype, result, raw, reply, content_idx, cl);
 			else
-				return parse_json(name, qtype, result, raw, reply, content_idx, cl);
+				r = parse_json(name, qtype, result, raw, reply, content_idx, cl);
+
+			if (r == 1)
+				break;
+
+			if (r < 0)
+				syslog(LOG_INFO, "Error when parsing reply from %s: %s", ns.c_str(), this->why());
+			else
+				syslog(LOG_INFO, "Could not get answer from %s.", ns.c_str());
+			ssl->close();
+			continue;
 		}
 	}
 
@@ -239,12 +250,12 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 		// parse chunked encoding
 		idx = reply.find("\r\n\r\n");
 		if (idx == string::npos || idx + 4 >= reply.size())
-			return build_error("Invalid reply.", -1);
+			return build_error("Invalid reply (1).", -1);
 		idx += 4;
 		for (;;) {
 			string::size_type nl = reply.find("\r\n", idx);
 			if (nl == string::npos || nl + 2 > reply.size())
-				return build_error("Invalid reply.", -1);
+				return build_error("Invalid reply (2).", -1);
 			cl = strtoul(reply.c_str() + idx, nullptr, 16);
 
 			// end of chunk?
@@ -252,7 +263,7 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 				break;
 
 			if (cl > 65535 || nl + 2 + cl + 2 > reply.size())
-				return build_error("Invalid reply.", -1);
+				return build_error("Invalid reply (3).", -1);
 			idx = nl + 2;
 			dns_reply += reply.substr(idx, cl);
 			idx += cl + 2;
@@ -264,7 +275,7 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 	raw = "rfc8484 answer";
 
 	if (dns_reply.size() < sizeof(dnshdr) + 5)
-		return build_error("Invalid reply.", -1);
+		return build_error("Invalid reply (4).", -1);
 
 	const dnshdr *dhdr = reinterpret_cast<const dnshdr *>(dns_reply.c_str());
 
@@ -278,7 +289,7 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 	idx = sizeof(dnshdr);
 	int qnlen = qname2host(dns_reply, tmp, idx);
 	if (qnlen <= 0 || idx + qnlen + 2*sizeof(uint16_t) >= dns_reply.size())
-		return build_error("Invalid reply.", -1);
+		return build_error("Invalid reply (5).", -1);
 	fqdn = lcs(tmp);
 	if (lcs(string(name + ".")) != fqdn)
 		return build_error("Wrong name in awnser.", -1);
@@ -298,12 +309,12 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 
 		// also handles compressed labels
 		if ((qnlen = qname2host(dns_reply, tmp, idx)) <= 0)
-			return build_error("Invalid reply.", -1);
+			return build_error("Invalid reply (6).", -1);
 		aname = lcs(tmp);
 
 		// 10 -> qtype, qclass, ttl, rdlen
 		if (idx + qnlen + 10 >= dns_reply.size())
-			return build_error("Invalid reply.", -1);
+			return build_error("Invalid reply (7).", -1);
 		idx += qnlen;
 		qtype = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint16_t);
@@ -315,11 +326,11 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 		idx += sizeof(uint16_t);
 
 		if (idx + rdlen > dns_reply.size() || qclass != htons(1) || rdlen == 0)
-			return build_error("Invalid reply.", -1);
+			return build_error("Invalid reply (8).", -1);
 
 		if (qtype == htons(dns_type::CNAME)) {
 			if (qname2host(dns_reply, tmp, idx) <= 0)
-				return build_error("Invalid reply.", -1);
+				return build_error("Invalid reply (9).", -1);
 			cname = lcs(tmp);
 
 			if (fqdns.count(aname) > 0) {
@@ -341,11 +352,11 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 		// unlike in CNAME parsing loop, do not convert answer to lowercase,
 		// as we want to put original name into answer
 		if ((qnlen = qname2host(dns_reply, aname, idx)) <= 0)
-			return build_error("Invalid reply.", -1);
+			return build_error("Invalid reply (10).", -1);
 
 		// 10 -> qtype, qclass, ttl, rdlen
 		if (idx + qnlen + 10 >= dns_reply.size())
-			return build_error("Invalid reply.", -1);
+			return build_error("Invalid reply (11).", -1);
 		idx += qnlen;
 		qtype = *reinterpret_cast<const uint16_t *>(dns_reply.c_str() + idx);
 		idx += sizeof(uint16_t);
@@ -357,13 +368,13 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 		idx += sizeof(uint16_t);
 
 		if (idx + rdlen > dns_reply.size() || qclass != htons(1) || rdlen == 0)
-			return build_error("Invalid reply.", -1);
+			return build_error("Invalid reply (12).", -1);
 
 		// Need to call host2qname() on orig embedded answer name,
 		// because it may contain compression
 		string qname = "";
 		if (host2qname(aname, qname) <= 0)
-			return build_error("Invalid reply.", -1);
+			return build_error("Invalid reply (13).", -1);
 
 		answer_t dns_ans{qname, qtype, qclass, ttl};
 
@@ -375,7 +386,7 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 			has_answer = 1;
 		} else if (qtype == htons(dns_type::AAAA) && fqdns.count(lcs(aname)) > 0) {
 			if (rdlen != 16)
-				return build_error("Invalid reply.", -1);
+				return build_error("Invalid reply (14).", -1);
 			dns_ans.rdata = dns_reply.substr(idx, 16);
 			result[acnt++] = dns_ans;
 			has_answer = 1;
@@ -383,9 +394,9 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 			string qcname = "";
 			// uncompress cname answer
 			if (qname2host(dns_reply, cname, idx) <= 0)
-				return build_error("Invalid reply.", -1);
+				return build_error("Invalid reply (15).", -1);
 			if (host2qname(cname, qcname) <= 0)
-				return build_error("Invalid reply.", -1);
+				return build_error("Invalid reply (16).", -1);
 			dns_ans.rdata = qcname;
 			result[acnt++] = dns_ans;
 		} else if (qtype == htons(dns_type::NS) && qtype == type) {

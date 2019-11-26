@@ -65,30 +65,33 @@ static int tcp_connect(const char *host, uint16_t port = 443)
 	if (inet_pton(AF_INET, host, &sin.sin_addr) == 1) {
 		if ((sock = socket(PF_INET, SOCK_STREAM, 0)) < 0)
 			return -1;
+		fcntl(sock, F_SETFL, O_RDWR|O_NONBLOCK);
 #ifdef TCP_FASTOPEN_CONNECT
 		setsockopt(sock, IPPROTO_TCP, TCP_FASTOPEN_CONNECT, &one, sizeof(one));
 #endif
 		sin.sin_family = AF_INET;
 		sin.sin_port = htons(port);
-		if (connect(sock, reinterpret_cast<sockaddr *>(&sin), sizeof(sin)) < 0) {
+		if (connect(sock, reinterpret_cast<sockaddr *>(&sin), sizeof(sin)) < 0 && errno != EINPROGRESS) {
 			close(sock);
 			return -1;
 		}
 	} else if (inet_pton(AF_INET6, host, &sin6.sin6_addr) == 1) {
 		if ((sock = socket(PF_INET6, SOCK_STREAM, 0)) < 0)
 			return -1;
+		fcntl(sock, F_SETFL, O_RDWR|O_NONBLOCK);
 #ifdef TCP_FASTOPEN_CONNECT
 		setsockopt(sock, IPPROTO_TCP, TCP_FASTOPEN_CONNECT, &one, sizeof(one));
 #endif
 		sin6.sin6_family = AF_INET6;
 		sin6.sin6_port = htons(port);
-		if (connect(sock, reinterpret_cast<sockaddr *>(&sin6), sizeof(sin6)) < 0) {
+		if (connect(sock, reinterpret_cast<sockaddr *>(&sin6), sizeof(sin6)) < 0 && errno != EINPROGRESS) {
 			close(sock);
 			return -1;
 		}
 	} else
 		return -1;
 
+	errno = 0;
 	return sock;
 }
 
@@ -203,24 +206,56 @@ static int post_connection_check(X509 *x509, const string &peer, string &cn)
 
 int ssl_box::connect_ssl(const string &host, uint16_t port = 443)
 {
+	int r = 0, err = 0;
 
 	this->close();
 
 	d_ns_ip = host;
 
+	// non-blocking connect
 	if ((d_sock = tcp_connect(host.c_str(), port)) < 0)
 		return build_error("connect_ssl::tcp_connect", -1);
+
+	timeval tv = {1, 0};	// 1s
+	fd_set rset;
+	FD_ZERO(&rset);
+	FD_SET(d_sock, &rset);
+	if ((r = select(d_sock + 1, &rset, &rset, nullptr, &tv)) <= 0)
+		return build_error("connect_ssl::select:", -1);
+	socklen_t len = sizeof(err);
+	if (getsockopt(d_sock, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err < 0)
+		return build_error("connect_ssl::getsockopt:", -1);
 
 	if ((d_ssl = SSL_new(d_ssl_ctx)) == nullptr)
 		return -1;
 	SSL_set_fd(d_ssl, d_sock);
-	if (SSL_connect(d_ssl) <= 0)
-		return build_error("connect_ssl::SSL_connect:", -1);
 
-	// only set non blocking after SSL_connect()
-	fcntl(d_sock, F_SETFL, O_RDWR|O_NONBLOCK);
+	long waiting = 0;
+	timespec ts = {0,  10000000};	// 10ms
+	for (; waiting < 1000000000;) {	// 1s
+		r = SSL_connect(d_ssl);
+		switch (SSL_get_error(d_ssl, r)) {
+		case SSL_ERROR_NONE:
+			r = 1;
+			break;
+		case SSL_ERROR_WANT_WRITE:
+		case SSL_ERROR_WANT_READ:
+			r = 0;
+			break;
+		default:
+			return build_error("connect_ssl::SSL_connect:", -1);
+		}
 
-	int err = 0;
+		if (r == 0) {
+			nanosleep(&ts, nullptr);
+			waiting += ts.tv_nsec;
+		} else if (r > 0)
+			break;
+	}
+
+	if (r != 1)
+		return build_error("connect_ssl::SSL_connect: Failed to connect in time.", -1);
+
 	if ((err = SSL_get_verify_result(d_ssl)) != X509_V_OK)
 		return build_error(X509_verify_cert_error_string(err), -1);
 
