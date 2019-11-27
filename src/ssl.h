@@ -89,7 +89,8 @@ public:
 
 	int setup_ctx();
 
-	int connect_ssl(const std::string &, uint16_t);
+	// 1s
+	int connect(const std::string &, uint16_t port = 443, long to = 1000000000);
 
 	// 1s
 	ssize_t send(const std::string &, long to = 1000000000);

@@ -204,7 +204,7 @@ static int post_connection_check(X509 *x509, const string &peer, string &cn)
 }
 
 
-int ssl_box::connect_ssl(const string &host, uint16_t port = 443)
+int ssl_box::connect(const string &host, uint16_t port, long to)
 {
 	int r = 0, err = 0;
 
@@ -216,7 +216,11 @@ int ssl_box::connect_ssl(const string &host, uint16_t port = 443)
 	if ((d_sock = tcp_connect(host.c_str(), port)) < 0)
 		return build_error("connect_ssl::tcp_connect", -1);
 
-	timeval tv = {1, 0};	// 1s
+	long us = to/(1000*2);	// half TO for select, other for potential repeated SSL_connect()
+	long waiting = 0;
+	timeval tv = {(time_t)us/1000000, (suseconds_t)us%1000000};
+	timespec ts = {0, 10000000};	// 10ms
+
 	fd_set rset;
 	FD_ZERO(&rset);
 	FD_SET(d_sock, &rset);
@@ -230,9 +234,7 @@ int ssl_box::connect_ssl(const string &host, uint16_t port = 443)
 		return -1;
 	SSL_set_fd(d_ssl, d_sock);
 
-	long waiting = 0;
-	timespec ts = {0,  10000000};	// 10ms
-	for (; waiting < 1000000000;) {	// 1s
+	for (; waiting < to/2;) {
 		r = SSL_connect(d_ssl);
 		switch (SSL_get_error(d_ssl, r)) {
 		case SSL_ERROR_NONE:

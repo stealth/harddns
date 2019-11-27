@@ -134,7 +134,7 @@ int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string 
 				return build_error("Can't handle query type.", -1);
 		}
 
-		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.55\r\nConnection: Keep-Alive\r\n";
+		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.56 github.com/stealth/harddns\r\nConnection: Keep-Alive\r\n";
 
 		if (cfg->second.rfc8484)
 			req += "Accept: application/dns-message\r\n";
@@ -151,7 +151,7 @@ int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string 
 
 		// maybe closed due to error or not initialized in the first place
 		if (ssl->send(req) <= 0) {
-			if (ssl->connect_ssl(ns, cfg->second.port) < 0) {
+			if (ssl->connect(ns, cfg->second.port) < 0) {
 				ssl->close();
 				syslog(LOG_INFO, "No SSL connection to %s (%s)", ns.c_str(), ssl->why());
 				continue;
@@ -219,13 +219,10 @@ int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string 
 			else
 				r = parse_json(name, qtype, result, raw, reply, content_idx, cl);
 
-			if (r == 1)
-				break;
+			if (r >= 0)
+				return r;
 
-			if (r < 0)
-				syslog(LOG_INFO, "Error when parsing reply from %s: %s", ns.c_str(), this->why());
-			else
-				syslog(LOG_INFO, "Could not get answer from %s.", ns.c_str());
+			syslog(LOG_INFO, "Error when parsing reply from %s for %s: %s", ns.c_str(), name.c_str(), this->why());
 			ssl->close();
 			continue;
 		}
@@ -283,7 +280,7 @@ int dnshttps::parse_rfc8484(const string &name, uint16_t type, dns_reply &result
 		return build_error("Invalid DNS header. Not a reply.", -1);
 
 	if (dhdr->rcode != 0)
-		return build_error("DNS error response from server.", -1);
+		return build_error("DNS error response from server.", 0);
 
 	string aname = "", cname = "", fqdn = "";
 	idx = sizeof(dnshdr);
@@ -433,7 +430,7 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 		// parse chunked encoding
 		idx = reply.find("\r\n\r\n");
 		if (idx == string::npos || idx + 4 >= reply.size())
-			return build_error("Invalid reply.", -1);
+			return build_error("Invalid reply (1).", -1);
 		idx += 4;
 		for (;;) {
 			string::size_type nl = reply.find("\r\n", idx);
