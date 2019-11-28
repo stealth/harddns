@@ -112,7 +112,7 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 		for (i = 0; s.size() > 0 && i < 5; ++i) {
 			r = dns->get(s, qtype, res, raw);
 			if (config::log_requests)
-				syslog(LOG_INFO, "nss %s %s? -> %s", name, af == AF_INET ? "A" : "AAAA", raw.c_str());
+				syslog(LOG_INFO, "nss %s %s? -> %s", s.c_str(), af == AF_INET ? "A" : "AAAA", raw.c_str());
 			if (r < 0) {
 				syslog(LOG_INFO, "%s", dns->why());
 				return NSS_STATUS_TRYAGAIN;
@@ -122,7 +122,7 @@ do_nss_harddns_gethostbyname3_r(const char *name, int af, struct hostent *result
 			unsigned int level = 0;
 			for (auto it = res.begin(); it != res.end() && s.size() == 0; ++it) {
 				if (it->second.name == "NSS CNAME" && level++ == i) {
-					s = it->first;
+					s = it->second.rdata;
 				}
 			}
 		}
@@ -274,7 +274,7 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 			// A
 			r = dns->get(s, htons(dns_type::A), res, raw);
 			if (config::log_requests)
-				syslog(LOG_INFO, "nss %s A? -> %s", name, raw.c_str());
+				syslog(LOG_INFO, "nss %s A? -> %s", s.c_str(), raw.c_str());
 			if (r < 0) {
 				syslog(LOG_INFO, "%s", dns->why());
 				return NSS_STATUS_TRYAGAIN;
@@ -285,7 +285,7 @@ do_nss_harddns_gethostbyname4_r(const char *name, struct gaih_addrtuple **pat,
 				// AAAA
 				r = dns->get(s, htons(dns_type::AAAA), res, raw);
 				if (raw.size() && config::log_requests)
-					syslog(LOG_INFO, "nss %s AAAA? -> %s", name, raw.c_str());
+					syslog(LOG_INFO, "nss %s AAAA? -> %s", s.c_str(), raw.c_str());
 				if (r < 0) {
 					syslog(LOG_INFO, "%s", dns->why());
 					return NSS_STATUS_TRYAGAIN;
