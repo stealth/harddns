@@ -470,15 +470,27 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 	string s = lcs(name);
 	map<string, int> fqdns{{s, 1}};
 	for (int level = 0; level < 10; ++level) {
+
 		if (!valid_name(s))
-			return build_error("Invalid DNS name.", -1);;
+			return build_error("Invalid DNS name.", -1);
+
+		// Some servers remove the trailing "." in FQDNs in their answer,
+		// and some add it -.-
+		// So check for both versions of the answer FQDN (looking for cname answers)
+
 		string cname = "\"name\":\"" + s;
 		if (s[s.size() - 1] != '.')
 			cname += ".";
 		cname += "\",\"type\":5,\"ttl\":";
-
-		if ((idx = json.find(cname, idx)) == string::npos)
-			break;
+		idx2 = idx;
+		if ((idx = json.find(cname, idx2)) == string::npos) {
+			cname = "\"name\":\"" + s;
+			if (cname[cname.size() - 1] == '.')
+				cname.erase(cname.size() - 1, 1);
+			cname += "\",\"type\":5,\"ttl\":";
+			if ((idx = json.find(cname, idx2)) == string::npos)
+				break;
+		}
 		idx += cname.size();
 
 		uint32_t ttl = strtoul(json.c_str() + idx, nullptr, 10);
@@ -523,13 +535,26 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 
 			char data[16] = {0};
 
+			// Some servers remove the trailing "." in FQDNs in their answer,
+			// and some add it -.-
+			// So check for both versions of the answer FQDN
+
 			string ans = "\"name\":\"" + it->first;
 			if ((it->first)[it->first.size() - 1] != '.')
 				ans += ".";
 			ans += "\",\"type\":";
-			if ((idx = json.find(ans, idx)) == string::npos)
-				break;
+			idx2 = idx;
+			if ((idx = json.find(ans, idx2)) == string::npos) {
+
+				ans = "\"name\":\"" + it->first;
+				if (ans[ans.size() - 1] == '.')
+					ans.erase(ans.size() - 1, 1);
+				ans += "\",\"type\":";
+				if ((idx = json.find(ans, idx2)) == string::npos)
+					break;
+			}
 			idx += ans.size();
+
 			uint16_t atype = (uint16_t)strtoul(json.c_str() + idx, nullptr, 10);
 
 			ans = ",\"ttl\":";
