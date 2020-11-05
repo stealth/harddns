@@ -117,6 +117,7 @@ int doh_proxy::forward_query(const string &ns, const string &src, const string &
 {
 	addrinfo *tai{nullptr}, hints;
 
+	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = d_af;
 	hints.ai_socktype = SOCK_DGRAM;
 	hints.ai_protocol = IPPROTO_UDP;
