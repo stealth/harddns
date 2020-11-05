@@ -1,7 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2019 by Sebastian Krahmer, sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2019-2020 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -112,6 +113,57 @@ bool doh_proxy::cache_lookup(const string &fqdn, uint16_t qtype, dnshttps::dns_r
 }
 
 
+int doh_proxy::forward_query(const string &ns, const string &src, const string &fqdn, uint16_t id, const char *buf, size_t blen)
+{
+	addrinfo *tai{nullptr}, hints;
+
+	hints.ai_family = d_af;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_protocol = IPPROTO_UDP;
+	hints.ai_flags = AI_NUMERICHOST;
+
+	int r = 0;
+	// local DNS server
+	if ((r = getaddrinfo(ns.c_str(), "53", &hints, &tai)) != 0)
+		return build_error("forward_query: Unable to resolve transparent forwarding address.", -1);
+
+	free_ptr<addrinfo> ai(tai, freeaddrinfo);
+
+	if (sendto(d_sock, buf, blen, 0, tai->ai_addr, tai->ai_addrlen) != (int)blen)
+		return build_error("forward_query: sendto() error.", -1);
+
+	// successfully sent, remember in cache to forward answers later
+	// based on cache lookup
+	string map_key = fqdn + string(reinterpret_cast<char *>(&id), sizeof(id));
+	map_key += string(reinterpret_cast<char *>(tai->ai_addr), tai->ai_addrlen);
+	d_fwd_cache[map_key] = src;
+
+	if (config::log_requests)
+		syslog(LOG_INFO, "proxy fwd %s to %s", fqdn.c_str(), ns.c_str());
+
+	return 0;
+}
+
+
+int doh_proxy::forward_answer(const string &ns, const string &fqdn, uint16_t id, const char *buf, size_t blen)
+{
+	string map_key = fqdn + string(reinterpret_cast<char *>(&id), sizeof(id)) + ns;
+
+	// Was there a query that we sent with this qname and ID to this NS?
+	auto it = d_fwd_cache.find(map_key);
+
+	if (it == d_fwd_cache.end())
+		return build_error("forward_answer:: Answer for no request of " + fqdn, -1);
+
+	if (sendto(d_sock, buf, blen, 0, reinterpret_cast<const sockaddr *>(it->second.c_str()), it->second.size()) != (int)blen)
+		return build_error("forward_answer::sendto():", -1);
+
+	d_fwd_cache.erase(it);
+
+	return 0;
+}
+
+
 int doh_proxy::loop()
 {
 	int r = 0;
@@ -136,26 +188,66 @@ int doh_proxy::loop()
 
 	for (;;) {
 		memset(buf, 0, sizeof(buf));
+		memset(from, 0, flen);
+
 		if ((r = recvfrom(d_sock, buf, sizeof(buf), 0, from, &flen)) <= 0)
 			continue;
+
+		errno = 0;
 
 		if ((size_t)r < sizeof(dnshdr) + 2*sizeof(uint16_t) + 1)
 			continue;
 		query = reinterpret_cast<dnshdr *>(buf);
 
-		// query indeed?
-		if (query->qr != 0 || query->opcode != 0)
-			continue;
 		if (query->q_count != htons(1))
 			continue;
 
+		// actually, the string qname will contain more than just the DNS qname but also
+		// all the remaining data. But qname2host() stops after the trailing \0 is seen,
+		// and the variable is just used for that translation
 		qname = string(buf + sizeof(dnshdr), r - sizeof(dnshdr) - 2*sizeof(uint16_t));
 		int qnlen = qname2host(qname, fqdn);
 		if (qnlen <= 0)
 			continue;
 
+		// remove trailing dot
+		auto dot = fqdn.rfind(".");
+		if (dot != string::npos)
+			fqdn.erase(dot, 1);
+
+		// If an answer, check and possibly forward if we proxied previous
+		// request to an internal DNS server. We only do a cache lookup based
+		// on fqdn and ID. Its up to the client to verify that the answer is legit;
+		// we are just forwarding from/to internal DNS server.
+		if (query->qr == 1) {
+			if (forward_answer(string(reinterpret_cast<char *>(from), flen), fqdn, query->id, buf, r) != 0)
+				syslog(LOG_INFO, "Failed: %s", this->why());
+			continue;
+		}
+
+		// must be a query by now
+		if (query->opcode != 0)
+			continue;
+
+		bool has_fwd = 0;
+
+		// check if we need to forward queries of internal domains to internal DNS
+		for (auto it = config::internal_domains.begin(); it != config::internal_domains.end(); ++it) {
+
+			// is internal domain suffix of fqdn?
+			if (fqdn.size() >= it->first.size() && fqdn.find(it->first) == (fqdn.size() - it->first.size())) {
+				if (forward_query(it->second, string(reinterpret_cast<char *>(from), flen), fqdn, query->id, buf, r) != 0)
+					syslog(LOG_INFO, "Failed: %s", this->why());
+				has_fwd = 1;
+				break;
+			}
+		}
+
+		if (has_fwd)
+			continue;
+
 		// It's important here that qname may not contain compression (qname2host() called
-		// with start_idx = 0)
+		// with start_idx = 0). Otherwise qnlen would be wrong.
 
 		qtype = ua_uint16(buf + sizeof(dnshdr) + qnlen);
 		qclass = ua_uint16(buf + sizeof(dnshdr) + qnlen + sizeof(uint16_t));
@@ -164,10 +256,6 @@ int doh_proxy::loop()
 			continue;
 		if (qclass != htons(1))
 			continue;
-
-		auto dot = fqdn.rfind(".");
-		if (dot != string::npos)
-			fqdn.erase(dot, 1);
 
 		//printf("%s %d %d\n", fqdn.c_str(), ntohs(qtype), ntohs(qclass));
 

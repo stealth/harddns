@@ -1,7 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2019 by Sebastian Krahmer, sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2019-2020 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,6 +25,7 @@
 #include <sys/time.h>
 #include <map>
 #include <string>
+#include <cstdint>
 #include <utility>
 #include "dnshttps.h"
 
@@ -43,9 +45,16 @@ class doh_proxy {
 
 	std::map<std::pair<std::string, uint16_t>, cache_elem_t> d_rr_cache;
 
+	// packet/origin addr
+	std::map<std::string, std::string> d_fwd_cache;
+
 	void cache_insert(const std::string &, uint16_t, const dnshttps::dns_reply &);
 
 	bool cache_lookup(const std::string &, uint16_t, dnshttps::dns_reply &);
+
+	int forward_query(const std::string &, const std::string &, const std::string &, uint16_t, const char *, size_t);
+
+	int forward_answer(const std::string &, const std::string &, uint16_t, const char *, size_t);
 
 	// As the dnshttp object we use the globally exported 'dns'
 	// as used for the NSS module

@@ -1,7 +1,7 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016-2019 by Sebastian Krahmer,
+ * (C) 2016-2020 by Sebastian Krahmer,
  *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
@@ -44,6 +44,9 @@ using namespace std;
 list<string> *ns = nullptr;
 map<string, struct a_ns_cfg> *ns_cfg = nullptr;
 
+// map internal domain to internal NS IP
+map<string, string> internal_domains;
+
 bool log_requests = 0, nss_aaaa = 0;
 
 
@@ -75,7 +78,11 @@ int parse_config(const string &cfgbase)
 			config::log_requests = 1;
 		else if (sline.find("nss_aaaa") == 0)
 			config::nss_aaaa = 1;
-		else if (sline.find("rfc8484") == 0) {
+		else if (sline.find("internal_domain=") == 0) {
+			string::size_type comma = sline.find(",");
+			if (comma != string::npos && comma > 16)
+				config::internal_domains[sline.substr(16, comma - 16)] = sline.substr(comma + 1);
+		} else if (sline.find("rfc8484") == 0) {
 			config::ns_cfg->find(ns)->second.rfc8484 = 1;
 		} else if (sline.find("nameserver=") == 0) {
 			ns = sline.substr(11);

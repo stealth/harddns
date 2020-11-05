@@ -17,7 +17,8 @@ Since then it has evolved and currently features:
 * RFC8484 and RFC8427 support
 * caching of successful resolves
 * TCP Fast Open when OS supports it
-* TLS 1.3 ready to benefit from faster handshakes
+* TLS 1.3 ready to benefit from faster handshakes (0-RTT)
+* Enterprise ready: can handle internal and external domains differently
 * small footprint and least privilege design
 * batteries included: comes with a config that works with all major DoH providers
 
@@ -116,7 +117,8 @@ at boot.
 ```
 
 And follow the instructions for the `nsswitch.conf` modification or
-the proxy-daemon startup at your choice.
+the proxy-daemon startup at your choice. The recommended usage is
+via the *harddnsd* daemon.
 
 If you have any (legacy) pinned certificates inside `/etc/harddns/pinned`,
 you should remove them. *harddns* is now using the CA bundle of your system.
@@ -212,6 +214,39 @@ For example, `/etc/apparmor.d/usr.sbin.nscd` should contain a line like
 
 in your *AppArmor* config.
 
+
+Enterprise setups
+-----------------
+
+It may happen that you want to have DoH for most of your lookups, but need to excempt
+certain domains from DoH and need to contact a normal DNS server instead.
+This may be configured as follows:
+
+```
+internal_domain = company.lan, 192.168.0.1
+internal_domain = partner.lan, 10.0.0.1
+```
+
+Rather than contacting public DoH servers for the domains `company.lan` and
+`partner.lan`, this would proxy the DNS requests as is to `192.168.0.1` and
+`10.0.0.1` respectively. All other domain lookups are still directed to
+the DoH servers as configured.
+This requires that you start *harddnsd* (rather than using the NSS module)
+and bind it to an IP address different from localhost, because it needs
+to forward the DNS answers as coming back on the LAN interface.
+
+
+Safety considerations
+---------------------
+
+You should run *harddnsd* either on the loopback interface or bind it
+to an address via `-l` that is part of the private IP space and does
+not belong to the globally routable IP space. *harddnsd* tries to detect this
+and warn you, if you avoid this recommendation. If you ignore this warning
+its not the end of the world but in this case everybody could abuse you
+as a recursive resolver and resolve arbitrary stuff masked as you.
+
+
 Notes
 -----
 
@@ -223,4 +258,5 @@ The content of the pinned certificate can be viewed via
 ```
 $ openssl x509 -text < /etc/harddns/pinned/dns1.pem
 ```
+
 

@@ -1,7 +1,7 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016-2019 by Sebastian Krahmer,
+ * (C) 2016-2020 by Sebastian Krahmer,
  *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
@@ -34,6 +34,8 @@ namespace config {
 
 extern std::list<std::string> *ns;
 extern bool log_requests, nss_aaaa;
+
+extern std::map<std::string, std::string> internal_domains;
 
 struct a_ns_cfg {
 	std::string ip, cn, host, get;

@@ -1,7 +1,8 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2019 by Sebastian Krahmer, sebastian [dot] krahmer [at] gmail [dot] com
+ * (C) 2019-2020 by Sebastian Krahmer,
+ *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -58,10 +59,48 @@ void close_fds()
 }
 
 
+void check_lan(const string &ip)
+{
+	if (ip.find("10.") == 0)
+		return;
+	if (ip.find("192.168.") == 0)
+		return;
+	if (ip.find("172.16.") == 0)
+		return;
+	if (ip.find("172.17.") == 0)
+		return;
+	if (ip.find("172.18.") == 0)
+		return;
+	if (ip.find("172.19.") == 0)
+		return;
+	// 172.20.x.y - 172.29.x.y
+	if (ip.find("172.2") == 0 && ip.size() > 6 && ip[6] == '.')
+		return;
+	if (ip.find("172.30.") == 0)
+		return;
+	if (ip.find("172.31.") == 0)
+		return;
+	if (ip.find("127.") == 0)
+		return;
+
+	if (ip.find("fc00:") == 0)
+		return;
+	if (ip.find("fd00:") == 0)
+		return;
+	if (ip.find("fe80:") == 0)
+		return;
+	if (ip.find("::1") == 0)
+		return;
+
+
+	cout<<"\nWarning!!! You seem to bind the DoH proxy to a public IP address. This may be risky.\n\n";
+}
+
+
 int main(int argc, char **argv)
 {
-	string banner = "\nharddns -- DoH proxy server v0.55\n\n"
-	                "(C) 2019 Sebastian Krahmer https://github.com/stealth/harddns\n\n\n";
+	string banner = "\nharddns -- DoH proxy server v0.57\n\n"
+	                "(C) 2019-2020 Sebastian Krahmer https://github.com/stealth/harddns\n\n\n";
 
 	char c = 0;
 	string laddr = "127.0.0.1", lport = "53", root = "/", user = "nobody";
@@ -96,6 +135,8 @@ int main(int argc, char **argv)
 
 	cout<<banner<<"Starting up DoH proxy at "<<laddr<<":"<<lport<<" (change with [-l addr] [-p port])\n"
 	    <<"switching to user '"<<user<<"' (change with [-u user])\n\n";
+
+	check_lan(laddr);
 
 	if (fork() > 0)
 		return 0;
