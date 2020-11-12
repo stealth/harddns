@@ -1,7 +1,7 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016-2019 by Sebastian Krahmer,
+ * (C) 2016-2020 by Sebastian Krahmer,
  *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
@@ -31,6 +31,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <syslog.h>
 #include "ssl.h"
 #include "misc.h"
 #include "config.h"
@@ -50,6 +51,7 @@ namespace harddns {
 using namespace std;
 
 ssl_box *ssl_conn = nullptr;
+
 
 
 static int tcp_connect(const char *host, uint16_t port = 443)
@@ -118,14 +120,14 @@ int ssl_box::setup_ctx()
 {
 	const SSL_METHOD *method = nullptr;
 
-	if ((method = SSLv23_client_method()) == nullptr)
+	if ((method = TLS_client_method()) == nullptr)
 		return build_error("SSLv23_client_method", -1);
 
 	if ((d_ssl_ctx = SSL_CTX_new(method)) == nullptr)
 		return build_error("SSL_CTX_new", -1);
 
 
-	long op = SSL_OP_ALL|SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1;
+	long op = SSL_OP_NO_SSLv2|SSL_OP_NO_SSLv3|SSL_OP_NO_TLSv1|SSL_OP_NO_TLSv1_1;
 
 	// This is a DNS lookup after all, so we can relax some of the options which we
 	// would sue otherwise to tighten security
@@ -159,10 +161,8 @@ int ssl_box::setup_ctx()
 
 	SSL_CTX_set_mode(d_ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
 
-#ifdef CIPHER_LIST
-	if (SSL_CTX_set_cipher_list(d_ssl_ctx, CIPHER_LIST) != 1)
-		return build_error("SSL_CTX_set_cipher_list:", -1);
-#endif
+	SSL_CTX_set_session_cache_mode(d_ssl_ctx, SSL_SESS_CACHE_CLIENT);
+	SSL_CTX_set_min_proto_version(d_ssl_ctx, TLS1_2_VERSION);
 
 	SSL_CTX_set_read_ahead(d_ssl_ctx, 0);
 
@@ -204,7 +204,8 @@ static int post_connection_check(X509 *x509, const string &peer, string &cn)
 }
 
 
-int ssl_box::connect(const string &host, uint16_t port, long to)
+
+int ssl_box::connect(const string &host, uint16_t port, string &early_data, long to)
 {
 	int r = 0, err = 0;
 
@@ -233,6 +234,29 @@ int ssl_box::connect(const string &host, uint16_t port, long to)
 	if ((d_ssl = SSL_new(d_ssl_ctx)) == nullptr)
 		return -1;
 	SSL_set_fd(d_ssl, d_sock);
+
+#if (OPENSSL_VERSION_NUMBER >= 0x10101000L)
+	uint32_t max_early = 0;
+	auto it = d_sessions.find(d_ns_ip);
+	if (it != d_sessions.end() && SSL_SESSION_is_resumable(it->second)) {
+		if (SSL_set_session(d_ssl, it->second) != 1)
+			return build_error("connect_ssl::SSL_set_session:", -1);
+		max_early = SSL_SESSION_get_max_early_data(it->second);
+	}
+
+	if (max_early > early_data.size()) {
+		size_t wn = 0;
+		if (SSL_write_early_data(d_ssl, early_data.c_str(), early_data.size(), &wn) != 1)
+			return build_error("connect_ssl::SSL_write_early_data:", -1);
+		if (wn != early_data.size())
+			return build_error("connect_ssl::SSL_write_early_data partial:", -1);
+		if (SSL_get_early_data_status(d_ssl) == SSL_EARLY_DATA_ACCEPTED) {
+			early_data = "";	// empty request buffer, so that ->send() is not called on it
+			if (config::log_requests)
+				syslog(LOG_INFO, "0-RTT accepted by %s", d_ns_ip.c_str());
+		}
+	}
+#endif
 
 	for (; waiting < to/2;) {
 		r = SSL_connect(d_ssl);
@@ -293,8 +317,21 @@ int ssl_box::connect(const string &host, uint16_t port, long to)
 
 void ssl_box::close()
 {
-	if (d_ssl)
+	if (d_ssl) {
+
+#if (OPENSSL_VERSION_NUMBER >= 0x10101000L)
+		// If there ever was a session ticket negotiated
+		// by client and server, it will be available at this point.
+		// This avoids the usage of SSL_CTX_sess_set_new_cb() which
+		// would have no access to class member data.
+		auto it = d_sessions.find(d_ns_ip);
+		if (it != d_sessions.end())
+			SSL_SESSION_free(it->second);
+		d_sessions[d_ns_ip] = SSL_get1_session(d_ssl);
+#endif
+		SSL_shutdown(d_ssl);
 		SSL_free(d_ssl);
+	}
 	d_ssl = nullptr;
 
 	if (d_sock > -1)

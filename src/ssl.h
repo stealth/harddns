@@ -21,6 +21,7 @@
 #ifndef harddns_ssl_h
 #define harddns_ssl_h
 
+#include <map>
 #include <vector>
 #include <cerrno>
 #include <cstdio>
@@ -49,6 +50,8 @@ private:
 	std::vector<EVP_PKEY *> d_pinned;
 	SSL_CTX *d_ssl_ctx{nullptr};
 	SSL *d_ssl{nullptr};
+
+	std::map<std::string, SSL_SESSION *> d_sessions;
 
 	std::string d_err{""}, d_ns_ip{""};
 
@@ -90,7 +93,7 @@ public:
 	int setup_ctx();
 
 	// 1s
-	int connect(const std::string &, uint16_t port = 443, long to = 1000000000);
+	int connect(const std::string &, uint16_t, std::string&, long to = 1000000000);
 
 	// 1s
 	ssize_t send(const std::string &, long to = 1000000000);

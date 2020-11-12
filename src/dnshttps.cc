@@ -151,12 +151,12 @@ int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string 
 
 		// maybe closed due to error or not initialized in the first place
 		if (ssl->send(req) <= 0) {
-			if (ssl->connect(ns, cfg->second.port) < 0) {
+			if (ssl->connect(ns, cfg->second.port, req) < 0) {
 				ssl->close();
 				syslog(LOG_INFO, "No SSL connection to %s (%s)", ns.c_str(), ssl->why());
 				continue;
 			}
-			if (ssl->send(req) != (int)req.size()) {
+			if (req.size() && ssl->send(req) != (int)req.size()) {
 				ssl->close();
 				syslog(LOG_INFO, "Unable to complete request to %s.", ns.c_str());
 				continue;
