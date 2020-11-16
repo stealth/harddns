@@ -120,8 +120,14 @@ int ssl_box::setup_ctx()
 {
 	const SSL_METHOD *method = nullptr;
 
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
 	if ((method = TLS_client_method()) == nullptr)
+		return build_error("TLS_client_method", -1);
+#else
+	if ((method = SSLv23_client_method()) == nullptr)
 		return build_error("SSLv23_client_method", -1);
+
+#endif
 
 	if ((d_ssl_ctx = SSL_CTX_new(method)) == nullptr)
 		return build_error("SSL_CTX_new", -1);
@@ -162,9 +168,12 @@ int ssl_box::setup_ctx()
 	SSL_CTX_set_mode(d_ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);
 
 	SSL_CTX_set_session_cache_mode(d_ssl_ctx, SSL_SESS_CACHE_CLIENT);
-	SSL_CTX_set_min_proto_version(d_ssl_ctx, TLS1_2_VERSION);
 
 	SSL_CTX_set_read_ahead(d_ssl_ctx, 0);
+
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+	SSL_CTX_set_min_proto_version(d_ssl_ctx, TLS1_2_VERSION);
+#endif
 
 	return 0;
 }
@@ -235,7 +244,7 @@ int ssl_box::connect(const string &host, uint16_t port, string &early_data, long
 		return -1;
 	SSL_set_fd(d_ssl, d_sock);
 
-#if (OPENSSL_VERSION_NUMBER >= 0x10101000L)
+#if (OPENSSL_VERSION_NUMBER >= 0x10101000L) && !(defined LIBRESSL_VERSION_NUMBER)
 	uint32_t max_early = 0;
 	auto it = d_sessions.find(d_ns_ip);
 	if (it != d_sessions.end() && SSL_SESSION_is_resumable(it->second)) {
@@ -319,7 +328,7 @@ void ssl_box::close()
 {
 	if (d_ssl) {
 
-#if (OPENSSL_VERSION_NUMBER >= 0x10101000L)
+#if (OPENSSL_VERSION_NUMBER >= 0x10101000L) && !defined(LIBRESSL_VERSION_NUMBER)
 		// If there ever was a session ticket negotiated
 		// by client and server, it will be available at this point.
 		// This avoids the usage of SSL_CTX_sess_set_new_cb() which
