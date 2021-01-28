@@ -231,10 +231,12 @@ int ssl_box::connect(const string &host, uint16_t port, string &early_data, long
 	timeval tv = {(time_t)us/1000000, (suseconds_t)us%1000000};
 	timespec ts = {0, 10000000};	// 10ms
 
-	fd_set rset;
+	fd_set rset, wset;
 	FD_ZERO(&rset);
+	FD_ZERO(&wset);
 	FD_SET(d_sock, &rset);
-	if ((r = select(d_sock + 1, &rset, &rset, nullptr, &tv)) <= 0)
+	FD_SET(d_sock, &wset);
+	if ((r = select(d_sock + 1, &rset, &wset, nullptr, &tv)) <= 0)
 		return build_error("connect_ssl::select:", -1);
 	socklen_t len = sizeof(err);
 	if (getsockopt(d_sock, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err < 0)

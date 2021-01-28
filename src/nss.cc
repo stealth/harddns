@@ -43,6 +43,11 @@
 
 #define ALIGN(x) (((x) + __SIZEOF_POINTER__ - 1) & ~(__SIZEOF_POINTER__ - 1))
 
+
+#ifndef RES_USE_INET6
+#define RES_USE_INET6	0x00002000
+#endif
+
 // as per https://developers.google.com/speed/public-dns/docs/dns-over-https
 //
 // API is at https://dns.google.com/resolve
