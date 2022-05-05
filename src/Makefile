@@ -8,11 +8,12 @@ LIBS=-lcrypto -lssl
 # (openssl since 1.1.1, you should add this in order to
 # benefit from faster TLS handshakes.
 # You also need to install and set apropriate path's for OSX (Darwin)
-#DEFS+=-I/opt/ssl/openssl-1.1.1/include
-#LIBS+=-L/opt/ssl/openssl-1.1.1/lib
+#SSL_PATH=/opt/ssl/openssl-1.1.1
+#DEFS+=-I$(SSL_PATH)/include
+#LIBS+=-L$(SSL_PATH)/lib
 
 # Not necessary for OSX
-#LIBS+=-Wl,--rpath=/opt/ssl/openssl-1.1.1/lib
+#LIBS+=-Wl,--rpath=$(SSL_PATH)/lib
 
 
 .PHONY: all clean distclean

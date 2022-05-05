@@ -459,12 +459,14 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 	// Turns out, C++ data structures were not really made for JSON. Maybe CORBA...
 	json.erase(remove(json.begin(), json.end(), ' '), json.end());
 
-	if (json.find("{\"status\":0") != 0)
+	if (json.find("\"status\":0") == string::npos)
 		return 0;
 	if ((idx = json.find("\"answer\":[")) == string::npos)
 		return 0;
 	idx += 10;
 	aidx = idx;
+
+	string::size_type brace_open = 0, brace_close = 0;
 
 	// first of all, find all CNAMEs
 	string s = lcs(name);
@@ -481,26 +483,38 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 		string cname = "\"name\":\"" + s;
 		if (s[s.size() - 1] != '.')
 			cname += ".";
-		cname += "\",\"type\":5,\"ttl\":";
-		idx2 = idx;
-		if ((idx = json.find(cname, idx2)) == string::npos) {
+		cname += "\",\"type\":5";
+		if ((idx = json.find(cname, aidx)) == string::npos) {
 			cname = "\"name\":\"" + s;
 			if (cname[cname.size() - 1] == '.')
 				cname.erase(cname.size() - 1, 1);
-			cname += "\",\"type\":5,\"ttl\":";
-			if ((idx = json.find(cname, idx2)) == string::npos)
+			cname += "\",\"type\":5";
+			if ((idx = json.find(cname, aidx)) == string::npos)
 				break;
 		}
-		idx += cname.size();
+		if ((brace_close = json.find("}", idx)) == string::npos)
+			return 0;
+		if ((brace_open = json.rfind("{", idx)) == string::npos)
+			return 0;
+		if (brace_open < aidx || brace_close < aidx)
+			return 0;
 
-		uint32_t ttl = strtoul(json.c_str() + idx, nullptr, 10);
-		if ((idx = json.find("\"data\":\"", idx)) == string::npos)
+		// guaranteed that { comes before }
+
+		string inner_json = json.substr(brace_open, brace_close - brace_open + 1);
+
+		uint32_t ttl = 0;
+		if ((idx = inner_json.find("\"ttl\":")) == string::npos)
+			ttl = 600;
+		else
+			ttl = strtoul(inner_json.c_str() + idx + 6, nullptr, 10);
+
+		if ((idx = inner_json.find("\"data\":\"")) == string::npos)
 			break;
 		idx += 8;
-		if ((idx2 = json.find("\"", idx)) == string::npos)
+		if ((idx2 = inner_json.find("\"", idx)) == string::npos)
 			break;
-		tmp = json.substr(idx, idx2 - idx);
-		idx = idx2;
+		tmp = inner_json.substr(idx, idx2 - idx);
 		if (!valid_name(tmp))
 			return build_error("Invalid DNS name.", -1);
 
@@ -523,6 +537,9 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 
 		//syslog(LOG_INFO, ">>>> CNAME %s -> %s\n", s.c_str(), tmp.c_str());
 		s = tmp;
+
+		// aidx guaranteed to stay valid by above checks
+		json.erase(brace_open, brace_close - brace_open + 1);
 	}
 
 	// now for the other records for original name and all CNAMEs
@@ -531,7 +548,7 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 		if (!valid_name(it->first))
 			continue;
 
-		for (idx = aidx; idx <= json.size();) {
+		for (;;) {
 
 			char data[16] = {0};
 
@@ -543,33 +560,42 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 			if ((it->first)[it->first.size() - 1] != '.')
 				ans += ".";
 			ans += "\",\"type\":";
-			idx2 = idx;
-			if ((idx = json.find(ans, idx2)) == string::npos) {
+			if ((idx = json.find(ans, aidx)) == string::npos) {
 
 				ans = "\"name\":\"" + it->first;
 				if (ans[ans.size() - 1] == '.')
 					ans.erase(ans.size() - 1, 1);
 				ans += "\",\"type\":";
-				if ((idx = json.find(ans, idx2)) == string::npos)
+				if ((idx = json.find(ans, aidx)) == string::npos)
 					break;
 			}
-			idx += ans.size();
 
+			idx += ans.size();
 			uint16_t atype = (uint16_t)strtoul(json.c_str() + idx, nullptr, 10);
 
-			ans = ",\"ttl\":";
-			if ((idx = json.find(ans, idx)) == string::npos)
-				break;
-			idx += ans.size();
+			if ((brace_close = json.find("}", idx)) == string::npos)
+				return 0;
+			if ((brace_open = json.rfind("{", idx)) == string::npos)
+				return 0;
+			if (brace_open < aidx || brace_close < aidx)
+				return 0;
 
-			uint32_t ttl = strtoul(json.c_str() + idx, nullptr, 10);
-			if ((idx = json.find("\"data\":\"", idx)) == string::npos)
+			// guaranteed that { comes before }
+
+			string inner_json = json.substr(brace_open, brace_close - brace_open + 1);
+
+			uint32_t ttl = 0;
+			if ((idx = inner_json.find("\"ttl\":")) == string::npos)
+				ttl = 600;
+			else
+				ttl = strtoul(inner_json.c_str() + idx + 6, nullptr, 10);
+
+			if ((idx = inner_json.find("\"data\":\"")) == string::npos)
 				break;
 			idx += 8;
-			if ((idx2 = json.find("\"", idx)) == string::npos)
+			if ((idx2 = inner_json.find("\"", idx)) == string::npos)
 				break;
-			tmp = json.substr(idx, idx2 - idx);
-			idx = idx2;
+			tmp = inner_json.substr(idx, idx2 - idx);
 
 			string qname = "";
 			if (host2qname(it->first, qname) <= 0)
@@ -603,6 +629,9 @@ int dnshttps::parse_json(const string &name, uint16_t type, dns_reply &result, s
 				has_answer = 1;
 			} else if (type == dns_type::MX) {
 			}
+
+			// aidx guaranteed to stay valid by above checks
+			json.erase(brace_open, brace_close - brace_open + 1);
 		}
 	}
 
