@@ -253,14 +253,21 @@ int doh_proxy::loop()
 		qtype = ua_uint16(buf + sizeof(dnshdr) + qnlen);
 		qclass = ua_uint16(buf + sizeof(dnshdr) + qnlen + sizeof(uint16_t));
 
-		if (qtype != htons(dns_type::A) && qtype != htons(dns_type::AAAA))
+		answer.id = query->id;
+
+		if (qtype != htons(dns_type::A) && qtype != htons(dns_type::AAAA)) {
+			answer.a_count = 0;
+			answer.rcode = 3;	// NXDOMAIN
+			reply = string(reinterpret_cast<char *>(&answer), sizeof(answer));
+			reply += string(buf + sizeof(dnshdr), qnlen + 2*sizeof(uint16_t));
+			sendto(d_sock, reply.c_str(), reply.size(), 0, from, flen);
 			continue;
+		}
 		if (qclass != htons(1))
 			continue;
 
 		//printf("%s %d %d\n", fqdn.c_str(), ntohs(qtype), ntohs(qclass));
 
-		answer.id = query->id;
 
 		result.clear();
 
