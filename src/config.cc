@@ -67,7 +67,8 @@ int parse_config(const string &cfgbase)
 
 	for (;!feof(f);) {
 		memset(buf, 0, sizeof(buf));
-		fgets(buf, sizeof(buf) - 1, f);
+		if (!fgets(buf, sizeof(buf) - 1, f))
+			break;
 		sline = buf;
 
 		sline.erase(remove(sline.begin(), sline.end(), ' '), sline.end());
