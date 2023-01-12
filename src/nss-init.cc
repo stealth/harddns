@@ -7,7 +7,7 @@
 extern "C" void harddns_nss_init() __attribute__((constructor));
 extern "C" void harddns_nss_init()
 {
-	harddns_init();
+	harddns_init("/etc/harddns");
 }
 
 

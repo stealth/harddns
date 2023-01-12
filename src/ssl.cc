@@ -159,10 +159,7 @@ int ssl_box::setup_ctx()
 	if (SSL_CTX_set_default_verify_paths(d_ssl_ctx) != 1)
 		return build_error("SSL_CTX_set_default_verify_dirs: %s\n", -1);
 
-	SSL_CTX_set_verify(d_ssl_ctx,
-	                       SSL_VERIFY_PEER|
- 	                       SSL_VERIFY_FAIL_IF_NO_PEER_CERT,
-	                       nullptr);
+	SSL_CTX_set_verify(d_ssl_ctx, SSL_VERIFY_PEER|SSL_VERIFY_FAIL_IF_NO_PEER_CERT, nullptr);
 	SSL_CTX_set_verify_depth(d_ssl_ctx, 100);
 
 	SSL_CTX_set_mode(d_ssl_ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER|SSL_MODE_ENABLE_PARTIAL_WRITE);

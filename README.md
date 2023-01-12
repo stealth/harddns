@@ -1,9 +1,9 @@
 D'oH! harddns
 =============
 
-![harddns](https://github.com/stealth/harddns/blob/master/logo.jpg)
-
-[![paypal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=9MVF8BRMX2CWA)
+<p align="center">
+<img src="https://github.com/stealth/harddns/blob/master/logo.jpg" />
+</p>
 
 *harddns* was one of the first DoH implementations for Linux
 at a time when only one big search company offered a public
@@ -259,4 +259,10 @@ The content of the pinned certificate can be viewed via
 $ openssl x509 -text < /etc/harddns/pinned/dns1.pem
 ```
 
+*proudly sponsored by:*
+<p align="center">
+<a href="https://github.com/c-skills/welcome">
+<img src="https://github.com/c-skills/welcome/blob/master/logo.jpg"/>
+</a>
+</p>
 

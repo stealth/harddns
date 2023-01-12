@@ -103,9 +103,9 @@ int main(int argc, char **argv)
 	                "(C) 2019-2020 Sebastian Krahmer https://github.com/stealth/harddns\n\n\n";
 
 	char c = 0;
-	string laddr = "127.0.0.1", lport = "53", root = "/", user = "nobody";
+	string laddr = "127.0.0.1", lport = "53", root = "/", user = "nobody", cfg_base = "/etc/harddns";
 
-	while ((c = getopt(argc, argv, "l:p:R:u:")) != -1) {
+	while ((c = getopt(argc, argv, "l:p:R:u:F:")) != -1) {
 
 		switch (c) {
 		case 'l':
@@ -119,6 +119,9 @@ int main(int argc, char **argv)
 			break;
 		case 'u':
 			user = optarg;
+			break;
+		case 'F':
+			cfg_base = optarg;
 			break;
 		default:
 			break;
@@ -144,7 +147,7 @@ int main(int argc, char **argv)
 	close_fds();
 	setsid();
 
-	harddns_init();
+	harddns_init(cfg_base);
 
 	doh_proxy doh;
 

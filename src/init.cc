@@ -66,10 +66,10 @@ static int load_certificates()
 }
 
 
-void harddns_init()
+void harddns_init(const string &cfg_base)
 {
 
-	harddns::config::parse_config("/etc/harddns");
+	harddns::config::parse_config(cfg_base);
 
 	SSL_library_init();
 	SSL_load_error_strings();
