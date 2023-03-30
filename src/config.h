@@ -33,7 +33,7 @@ namespace config {
 
 
 extern std::list<std::string> *ns;
-extern bool log_requests, nss_aaaa;
+extern bool log_requests, nss_aaaa, cache_PTR;
 
 extern std::map<std::string, std::string> internal_domains;
 

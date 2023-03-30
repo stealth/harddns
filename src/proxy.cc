@@ -61,27 +61,45 @@ int doh_proxy::init(const string &laddr, const string &lport)
 }
 
 
-void doh_proxy::cache_insert(const string &fqdn, uint16_t qtype, const dnshttps::dns_reply &ans)
+void doh_proxy::cache_insert(const string &fqdn, uint16_t qtype, const dnshttps::dns_reply &reply)
 {
 	timeval tv;
 	gettimeofday(&tv, nullptr);
 
-	auto idx = d_rr_cache.find(make_pair(fqdn, qtype));
+	// If we successfully resolved an A lookup, synthesize a PTR entry for it into the cache
+	// that can be looked up by {"4.3.2.1.in-addr.arpa", htons(dns_type::PTR)} and for AAAA likewise.
+	if (config::cache_PTR && (qtype == htons(dns_type::A) || qtype == htons(dns_type::AAAA))) {
+		string dname = "";
+		host2qname(fqdn, dname);
+		for (auto i = reply.begin(); i != reply.end(); ++i) {
+			string ptr_name = "", ptr_qname = "";
+			if (qtype == htons(dns_type::A))
+				ptr_name = A2PTR_fqdn(i->second.rdata);
+			else
+				ptr_name = AAAA2PTR_fqdn(i->second.rdata);
+			host2qname(ptr_name, ptr_qname);
+			if (ptr_name.empty() || dname.size() < 2 || ptr_qname.size() < 2)
+				continue;
+			dnshttps::answer_t ptr_ans = {ptr_qname, htons(dns_type::PTR), htons(1), htonl(1000), dname};
+			cache_elem_t elem{{{0, ptr_ans}}, tv.tv_sec + 1000};
+			d_rr_cache.insert({{ptr_name, htons(dns_type::PTR)}, elem});
+		}
+	}
 
+	auto idx = d_rr_cache.find({fqdn, qtype});
 	if (idx != d_rr_cache.end())
 		d_rr_cache.erase(idx);
 
 	uint32_t min_ttl = 0xffffffff;
-	for (auto i = ans.begin(); i != ans.end(); ++i) {
-		if (i->second.name.find("NSS") == 0)
+	for (auto i = reply.begin(); i != reply.end(); ++i) {
+		if (i->second.name.find("NSS ") == 0)
 			continue;
 		if (min_ttl > ntohl(i->second.ttl))
 			min_ttl = ntohl(i->second.ttl);
 	}
 
-	cache_elem_t elem{ans, tv.tv_sec + min_ttl};
-
-	d_rr_cache[make_pair(fqdn, qtype)] = elem;
+	cache_elem_t elem{reply, tv.tv_sec + min_ttl};
+	d_rr_cache[{fqdn, qtype}] = elem;
 }
 
 
@@ -93,10 +111,16 @@ bool doh_proxy::cache_lookup(const string &fqdn, uint16_t qtype, dnshttps::dns_r
 	if (d_rr_cache.size() == 0)
 		return 0;
 
-	auto idx = d_rr_cache.find(make_pair(fqdn, qtype));
+	auto idx = d_rr_cache.find({fqdn, qtype});
 
 	if (idx == d_rr_cache.end())
 		return 0;
+
+	// no TTL checks for cached PTR lookups
+	if (qtype == htons(dns_type::PTR)) {
+		result = idx->second.answer;
+		return 1;
+	}
 
 	if (idx->second.valid_until <= tv.tv_sec) {
 		d_rr_cache.erase(idx);
@@ -256,18 +280,21 @@ int doh_proxy::loop()
 		answer.id = query->id;
 
 		if (qtype != htons(dns_type::A) && qtype != htons(dns_type::AAAA)) {
-			answer.a_count = 0;
-			answer.rcode = 3;	// NXDOMAIN
-			reply = string(reinterpret_cast<char *>(&answer), sizeof(answer));
-			reply += string(buf + sizeof(dnshdr), qnlen + 2*sizeof(uint16_t));
-			sendto(d_sock, reply.c_str(), reply.size(), 0, from, flen);
-			continue;
+
+			// if PTR lookups are disabled or do not exist in the cache, NXDOMAIN
+			if ((qtype == htons(dns_type::PTR) && !config::cache_PTR) || d_rr_cache.count({fqdn, htons(dns_type::PTR)}) == 0) {
+				answer.a_count = 0;
+				answer.rcode = 3;	// NXDOMAIN
+				reply = string(reinterpret_cast<char *>(&answer), sizeof(answer));
+				reply += string(buf + sizeof(dnshdr), qnlen + 2*sizeof(uint16_t));
+				sendto(d_sock, reply.c_str(), reply.size(), 0, from, flen);
+				continue;
+			}
 		}
 		if (qclass != htons(1))
 			continue;
 
 		//printf("%s %d %d\n", fqdn.c_str(), ntohs(qtype), ntohs(qclass));
-
 
 		result.clear();
 
@@ -292,8 +319,12 @@ int doh_proxy::loop()
 			continue;
 		}
 
-		if (config::log_requests)
-			syslog(LOG_INFO, "proxy %s %s? -> %s", fqdn.c_str(), qtype == htons(dns_type::A) ? "A" : "AAAA", rdata_from_cache ? "(cached)" : raw.c_str());
+		if (config::log_requests) {
+			string log_type = qtype == htons(dns_type::A) ? "A" : "AAAA";
+			if (qtype == htons(dns_type::PTR))
+				log_type = "PTR";
+			syslog(LOG_INFO, "proxy %s %s? -> %s", fqdn.c_str(), log_type.c_str(), rdata_from_cache ? "(cached)" : raw.c_str());
+		}
 
 		// We found an answer
 		answer.rcode = 0;
@@ -316,7 +347,7 @@ int doh_proxy::loop()
 			const auto &elem = result[i];
 
 			// skip the entries that were created for NSS module
-			if (elem.name.find("NSS") == 0)
+			if (elem.name.find("NSS ") == 0)
 				continue;
 
 			rdlen = htons(elem.rdata.size());

@@ -174,6 +174,38 @@ bool valid_name(const string &name)
 }
 
 
+string A2PTR_fqdn(const string &rdata_A)
+{
+	string ret = "";
+	if (rdata_A.size() != sizeof(uint32_t))
+		return ret;
+
+	char tmp[32] = {0};
+	for (unsigned int i = sizeof(uint32_t); i > 0; --i) {
+		snprintf(tmp, sizeof(tmp) - 1, "%d.", rdata_A[i - 1] & 0xff);
+		ret += tmp;
+	}
+	ret += "in-addr.arpa";
+	return ret;
+}
+
+
+string AAAA2PTR_fqdn(const string &rdata_AAAA)
+{
+	string ret = "";
+	if (rdata_AAAA.size() != 16)
+		return ret;
+
+	char tmp[64] = {0};
+	for (unsigned int i = 16; i > 0; --i) {
+		snprintf(tmp, sizeof(tmp) - 1, "%1x.%1x.", rdata_AAAA[i - 1] & 0xf, (rdata_AAAA[i - 1] & 0xf0)>>4);
+		ret += tmp;
+	}
+	ret += "ip6.arpa";
+	return ret;
+}
+
+
 string lcs(const string &s)
 {
 	string rs = s;

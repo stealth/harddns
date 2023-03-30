@@ -47,7 +47,7 @@ map<string, struct a_ns_cfg> *ns_cfg = nullptr;
 // map internal domain to internal NS IP
 map<string, string> internal_domains;
 
-bool log_requests = 0, nss_aaaa = 0;
+bool log_requests = 0, nss_aaaa = 0, cache_PTR = 0;
 
 
 int parse_config(const string &cfgbase)
