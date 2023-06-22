@@ -309,7 +309,11 @@ int ssl_box::connect(const string &host, uint16_t port, string &early_data, long
 
 		bool has = 0;
 		for (auto p : d_pinned) {
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+			if (EVP_PKEY_eq(p, peer_key) == 1)
+#else
 			if (EVP_PKEY_cmp(p, peer_key) == 1)
+#endif
 				has = 1;
 		}
 

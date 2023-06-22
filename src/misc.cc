@@ -21,7 +21,7 @@
 #include <cstring>
 #include <cctype>
 #include <algorithm>
-
+#include <cstdint>
 
 namespace harddns {
 
