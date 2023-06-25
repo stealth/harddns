@@ -1,7 +1,7 @@
 
 CXX=c++
 INC=
-CXXFLAGS=-c -Wall -O2 -std=c++11 -pedantic -fPIC
+CXXFLAGS=-c -Wall -O2 -std=c++11 -pedantic -fPIC -fsigned-char
 LIBS=-lcrypto -lssl
 
 # If you have openssl or libressl with TLS1.3 support
