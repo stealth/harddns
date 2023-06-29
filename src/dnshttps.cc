@@ -1,7 +1,7 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2016-2019 by Sebastian Krahmer,
+ * (C) 2016-2023 by Sebastian Krahmer,
  *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
@@ -134,7 +134,7 @@ int dnshttps::get(const string &name, uint16_t qtype, dns_reply &result, string 
 				return build_error("Can't handle query type.", -1);
 		}
 
-		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.57 github.com/stealth/harddns\r\nConnection: Keep-Alive\r\n";
+		req += " HTTP/1.1\r\nHost: " + host + "\r\nUser-Agent: harddns 0.58 github.com/stealth/harddns\r\nConnection: Keep-Alive\r\n";
 
 		if (cfg->second.rfc8484)
 			req += "Accept: application/dns-message\r\n";

@@ -236,6 +236,14 @@ and bind it to an IP address different from localhost, because it needs
 to forward the DNS answers as coming back on the LAN interface.
 
 
+PTR lookups
+-----------
+
+When `harddnsd` is started with the `-P` switch, it creates synthetic PTR records
+for each successful resolved A and AAAA record. This allows to avoid non-DoH PTR lookups
+i.e. for `ping` sessions that try to resovle seen IPs back to domain names.
+
+
 Safety considerations
 ---------------------
 

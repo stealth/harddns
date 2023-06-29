@@ -1,7 +1,7 @@
 /*
  * This file is part of harddns.
  *
- * (C) 2019-2020 by Sebastian Krahmer,
+ * (C) 2019-2023 by Sebastian Krahmer,
  *                  sebastian [dot] krahmer [at] gmail [dot] com
  *
  * harddns is free software: you can redistribute it and/or modify
@@ -99,10 +99,10 @@ void check_lan(const string &ip)
 
 int main(int argc, char **argv)
 {
-	string banner = "\nharddns -- DoH proxy server v0.57\n\n"
-	                "(C) 2019-2020 Sebastian Krahmer https://github.com/stealth/harddns\n\n\n";
+	string banner = "\nharddns -- DoH proxy server v0.58\n\n"
+	                "(C) 2019-2023 Sebastian Krahmer https://github.com/stealth/harddns\n\n\n";
 
-	char c = 0;
+	int c = 0;
 	string laddr = "127.0.0.1", lport = "53", root = "/", user = "nobody", cfg_base = "/etc/harddns";
 
 	while ((c = getopt(argc, argv, "l:p:R:u:F:P")) != -1) {
