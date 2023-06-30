@@ -49,6 +49,12 @@ extern std::map<std::string, struct a_ns_cfg> *ns_cfg;
 int parse_config(const std::string &cfgbase);
 
 
+#ifdef TLS_0RTT
+constexpr bool WANT_TLS_0RTT = 1;
+#else
+constexpr bool WANT_TLS_0RTT = 0;
+#endif
+
 }
 
 }

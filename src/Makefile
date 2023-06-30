@@ -1,19 +1,23 @@
 
 CXX=c++
 INC=
-CXXFLAGS=-c -Wall -O2 -std=c++11 -pedantic -fPIC
+CXXFLAGS=-c -Wall -O2 -std=c++17 -pedantic -fPIC
 LIBS=-lcrypto -lssl
 
 # If you have openssl or libressl with TLS1.3 support
 # (openssl since 1.1.1, you should add this in order to
 # benefit from faster TLS handshakes.
 # You also need to install and set apropriate path's for OSX (Darwin)
-#SSL_PATH=/opt/ssl/openssl-1.1.1
+#SSL_PATH=/opt/ssl/libressl-3.7.0
 #DEFS+=-I$(SSL_PATH)/include
 #LIBS+=-L$(SSL_PATH)/lib
 
 # Not necessary for OSX
 #LIBS+=-Wl,--rpath=$(SSL_PATH)/lib
+
+
+# Note that LibreSSL is not supporting TLS 0RTT and will become a NOP in this case
+DEFS+=-DTLS_0RTT
 
 
 .PHONY: all clean distclean
