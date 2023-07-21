@@ -252,11 +252,11 @@ int ssl_box::connect(const string &host, uint16_t port, string &early_data, long
 		if (config::log_requests)
 			syslog(LOG_INFO, "TLS session ticket found for %s", d_ns_ip.c_str());
 
-		if constexpr (config::WANT_TLS_0RTT)
+		if constexpr (WANT_TLS_0RTT)
 			max_early = SSL_SESSION_get_max_early_data(it->second);
 	}
 
-	if constexpr (config::WANT_TLS_0RTT) {
+	if constexpr (WANT_TLS_0RTT) {
 	if (max_early > early_data.size()) {
 		size_t wn = 0;
 		if (SSL_write_early_data(d_ssl, early_data.c_str(), early_data.size(), &wn) != 1)
@@ -268,8 +268,8 @@ int ssl_box::connect(const string &host, uint16_t port, string &early_data, long
 	for (; waiting < to/2;) {
 		r = SSL_connect(d_ssl);
 
-		if constexpr (config::WANT_TLS_0RTT) {
-		if (!early_data.empty() && SSL_get_early_data_status(d_ssl) == SSL_EARLY_DATA_ACCEPTED) {
+		if constexpr (WANT_TLS_0RTT) {
+		if (!early_data.empty() && SSL_get_early_data_status(d_ssl) == EARLY_DATA_ACCEPTED) {
 			early_data = "";	// empty request buffer, so that ->send() is not called on it
 			if (config::log_requests)
 				syslog(LOG_INFO, "TLS 0RTT accepted by %s", d_ns_ip.c_str());
