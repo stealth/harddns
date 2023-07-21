@@ -243,31 +243,38 @@ int ssl_box::connect(const string &host, uint16_t port, string &early_data, long
 		return -1;
 	SSL_set_fd(d_ssl, d_sock);
 
-#if (OPENSSL_VERSION_NUMBER >= 0x10101000L) && !(defined LIBRESSL_VERSION_NUMBER)
 	uint32_t max_early = 0;
+
 	auto it = d_sessions.find(d_ns_ip);
 	if (it != d_sessions.end() && SSL_SESSION_is_resumable(it->second)) {
 		if (SSL_set_session(d_ssl, it->second) != 1)
 			return build_error("connect_ssl::SSL_set_session:", -1);
-		max_early = SSL_SESSION_get_max_early_data(it->second);
+		if (config::log_requests)
+			syslog(LOG_INFO, "TLS session ticket found for %s", d_ns_ip.c_str());
+
+		if constexpr (WANT_TLS_0RTT)
+			max_early = SSL_SESSION_get_max_early_data(it->second);
 	}
 
+	if constexpr (WANT_TLS_0RTT) {
 	if (max_early > early_data.size()) {
 		size_t wn = 0;
 		if (SSL_write_early_data(d_ssl, early_data.c_str(), early_data.size(), &wn) != 1)
 			return build_error("connect_ssl::SSL_write_early_data:", -1);
 		if (wn != early_data.size())
 			return build_error("connect_ssl::SSL_write_early_data partial:", -1);
-		if (SSL_get_early_data_status(d_ssl) == SSL_EARLY_DATA_ACCEPTED) {
-			early_data = "";	// empty request buffer, so that ->send() is not called on it
-			if (config::log_requests)
-				syslog(LOG_INFO, "0-RTT accepted by %s", d_ns_ip.c_str());
-		}
-	}
-#endif
+	}}
 
 	for (; waiting < to/2;) {
 		r = SSL_connect(d_ssl);
+
+		if constexpr (WANT_TLS_0RTT) {
+		if (!early_data.empty() && SSL_get_early_data_status(d_ssl) == EARLY_DATA_ACCEPTED) {
+			early_data = "";	// empty request buffer, so that ->send() is not called on it
+			if (config::log_requests)
+				syslog(LOG_INFO, "TLS 0RTT accepted by %s", d_ns_ip.c_str());
+		}}
+
 		switch (SSL_get_error(d_ssl, r)) {
 		case SSL_ERROR_NONE:
 			r = 1;
@@ -331,7 +338,6 @@ void ssl_box::close()
 {
 	if (d_ssl) {
 
-#if (OPENSSL_VERSION_NUMBER >= 0x10101000L) && !defined(LIBRESSL_VERSION_NUMBER)
 		// If there ever was a session ticket negotiated
 		// by client and server, it will be available at this point.
 		// This avoids the usage of SSL_CTX_sess_set_new_cb() which
@@ -340,7 +346,6 @@ void ssl_box::close()
 		if (it != d_sessions.end())
 			SSL_SESSION_free(it->second);
 		d_sessions[d_ns_ip] = SSL_get1_session(d_ssl);
-#endif
 		SSL_shutdown(d_ssl);
 		SSL_free(d_ssl);
 	}
